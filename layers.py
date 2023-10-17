@@ -119,15 +119,17 @@ class ModuleInjection:
         return new_linear
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, model: nn.Module, index=None):
+    def __init__(self, model: nn.Module, index=None, layers=None):
         super().__init__()
         self.model = model
         idx = 0
         for name, l in self.model.named_modules():
-            if isinstance(l, nn.Linear) and ('q' in name):
-                if idx==index:
-                    l.register_forward_hook(self.save_outputs_hook())
-                idx+=1
+            if isinstance(l, nn.Linear):
+                for eligible_layer in layers:
+                    if eligible_layer in name:
+                        if idx==index:
+                            l.register_forward_hook(self.save_outputs_hook())
+                        idx+=1
 
     def save_outputs_hook(self):
         def fn(_, __, output):

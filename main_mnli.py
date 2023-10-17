@@ -8,6 +8,16 @@ from transformers import (
 )
 from datasets import load_dataset
 from trainer import LocalTrainer
+import argparse
+
+parser = argparse.ArgumentParser("main")
+parser.add_argument("--layers", type=str, default='q,k,v')
+parser.add_argument("--budget", type=float, default=0.5)
+parser.add_argument("--save_name", type=str, default=None)
+
+args = parser.parse_args()
+if args.save_name is None:
+    args.save_name = f'mnli_{args.budget}_{args.layers}_eigen'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -38,7 +48,7 @@ dataset = dataset.map(preprocess_function).select(range(50000))
 # dataset = dataset.map(preprocess_function, batched=True)
 
 training_args = TrainingArguments(
-    output_dir="mnli_20_query_eigen",
+    output_dir=f"{args.save_name}",
     per_device_train_batch_size=32,
     gradient_accumulation_steps=1,
     logging_steps=1,
@@ -58,5 +68,7 @@ trainer = LocalTrainer(
     max_seq_length=2048,
     tokenizer=tokenizer,
     args=training_args,
+    layers=args.layers,
+    kappa_factor=0.5
 )
 trainer.train()

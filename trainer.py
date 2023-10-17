@@ -79,8 +79,12 @@ class LocalTrainer(SFTTrainer):
         num_of_sequences: Optional[int] = 1024,
         chars_per_token: Optional[float] = 3.6,
         dataset_num_proc: Optional[int] = None,
-        dataset_batch_size: int = 1000,            
+        dataset_batch_size: int = 1000,
+        layers: str = "SelfAttention.q,SelfAttention.k,SelfAttention.v,SelfAttention.o,DenseReluDense.wi,DenseReluDense.wo",
+        kappa_factor: float = 0.5,
     ):
+        self.layers = layers.split(',')
+        self.kappa_factor = kappa_factor
         super().__init__(
             model=model,
             args=args,
@@ -313,6 +317,7 @@ class LocalTrainer(SFTTrainer):
         # This should be the same if the state has been saved but in case the training arguments changed, it's safer
         # to set this after the load.
         self.decomposer_init()
+        max_steps = max_steps/num_train_epochs*len(self.decomposable_layers)
         num_train_epochs = len(self.decomposable_layers)
         self.state.max_steps = max_steps
         self.state.num_train_epochs = num_train_epochs
@@ -621,16 +626,19 @@ class LocalTrainer(SFTTrainer):
         self.teacher = copy.deepcopy(self.model)
         self.decomposable_layers = []
         for name, l in self.model.named_modules():
-            if isinstance(l, nn.Linear) and ('q' in name):
-                tokens = name.strip().split('.')
-                layer = self.model
-                for t in tokens[:-1]:
-                    if not t.isnumeric():
-                        layer = getattr(layer, t)
-                    else:
-                        layer = layer[int(t)]
+            if isinstance(l, nn.Linear):
+                for eligible_layer in self.layers:
+                    if eligible_layer in name:
+                        tokens = name.strip().split('.')
+                        layer = self.model
+                        for t in tokens[:-1]:
+                            if not t.isnumeric():
+                                layer = getattr(layer, t)
+                            else:
+                                layer = layer[int(t)]
 
-                self.decomposable_layers.append([layer, tokens[-1]])
+                        self.decomposable_layers.append([layer, tokens[-1]])
+                        break
 
         for _, param in self.model.named_parameters():
             param.requires_grad = False
@@ -648,11 +656,11 @@ class LocalTrainer(SFTTrainer):
             out_channels = layer.out_features
             kappa = in_channels*out_channels/(in_channels+out_channels)
             # rank = int(min(in_channels, out_channels)*0.95)
-            rank = int(kappa*0.2)
+            rank = int(kappa*self.kappa_factor)
         setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), rank, 'eigen'))
         logger.info("Number of parameters:",sum(p.numel() for p in self.model.parameters()))
-        self.teacher_extractor = FeatureExtractor(self.teacher,index=index)
-        self.student_extractor = FeatureExtractor(self.model,index=index)
+        self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
+        self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)
 
     def reset_decomposition(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
