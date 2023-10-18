@@ -102,6 +102,40 @@ class DecomposeLinearEigen(torch.nn.Linear):
         new_linear.weight2.requires_grad = True
         return new_linear
 
+class DecomposeLinearEigenPrune(DecomposeLinearEigen):
+    def __init__(self, in_features, out_features, rank, weight, bias):
+        super(DecomposeLinearEigenPrune, self).__init__(
+            in_features=in_features, out_features=out_features, rank=rank, weight=weight, bias=bias
+        )
+        self.zeta = nn.Parameter(
+            torch.ones(1, rank, requires_grad=True, device='cuda')
+        )
+
+    def forward(self, input):
+        if not self.init:
+            self.init_lowrank(input)
+        self.mask = self.zeta - self.zeta.detach() + (self.zeta>0).to(self.zeta.device).to(self.zeta.dtype)
+        return F.linear(
+            F.linear(input, self.weight1, None)*self.mask,
+            self.weight2,
+            self.bias,
+        )
+    
+    def prune_ratio(self):
+        return ((self.zeta>0).sum()/self.rank).item()
+
+    @staticmethod
+    def from_linear(linear_module, rank):
+        new_linear = DecomposeLinearEigenPrune(
+            linear_module.in_features, linear_module.out_features, rank, linear_module.weight, linear_module.bias
+        )
+        # new_linear.weight = None
+        new_linear.bias.requires_grad = True
+        new_linear.weight1.requires_grad = True
+        new_linear.weight2.requires_grad = True
+        new_linear.zeta.requires_grad = True
+        return new_linear
+
 
 class ModuleInjection:
     @staticmethod
@@ -111,7 +145,9 @@ class ModuleInjection:
         :param linear_module: A Linear module
         :return: a linear that is decomposed
         """
-        if method=='eigen':
+        if method=='prune':
+            new_linear = DecomposeLinearEigenPrune.from_linear(linear_module, linear_module.out_features)
+        elif method=='eigen':
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
         else:
             new_linear = DecomposeLinearSVD.from_linear(linear_module, rank)

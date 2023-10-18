@@ -45,7 +45,7 @@ if is_torch_tpu_available(check_device=False):
 if is_apex_available():
     from apex import amp
 
-from layers import ModuleInjection, FeatureExtractor
+from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +80,13 @@ class LocalTrainer(SFTTrainer):
         chars_per_token: Optional[float] = 3.6,
         dataset_num_proc: Optional[int] = None,
         dataset_batch_size: int = 1000,
-        layers: str = "SelfAttention.q,SelfAttention.k,SelfAttention.v,SelfAttention.o,DenseReluDense.wi,DenseReluDense.wo",
+        layers: str = "Attention.q,Attention.k,Attention.v,Attention.o,DenseReluDense.wi,DenseReluDense.wo",
         kappa_factor: float = 0.5,
+        algo = 'eigen',
     ):
         self.layers = layers.split(',')
         self.kappa_factor = kappa_factor
+        self.algo = algo
         super().__init__(
             model=model,
             args=args,
@@ -319,7 +321,7 @@ class LocalTrainer(SFTTrainer):
         self.decomposer_init()
         max_steps = max_steps/num_train_epochs*len(self.decomposable_layers)
         num_train_epochs = len(self.decomposable_layers)
-        self.state.max_steps = max_steps
+        self.state.max_steps = int(max_steps)
         self.state.num_train_epochs = num_train_epochs
         self.state.is_local_process_zero = self.is_local_process_zero()
         self.state.is_world_process_zero = self.is_world_process_zero()
@@ -617,6 +619,60 @@ class LocalTrainer(SFTTrainer):
         loss = nn.functional.mse_loss(teacher_feats, student_feats)
         return loss
 
+    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+        if self.control.should_log:
+            if is_torch_tpu_available():
+                xm.mark_step()
+
+            logs: Dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+            if self.algo == 'prune':
+                budgets = []
+                for name, l in self.model.named_modules():
+                    if isinstance(l, DecomposeLinearEigenPrune):
+                        budget = l.prune_ratio()
+                        budgets.append(budget)
+                logs["budget"] = f'{budgets}'
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs)
+
+        metrics = None
+        if self.control.should_evaluate:
+            if isinstance(self.eval_dataset, dict):
+                metrics = {}
+                for eval_dataset_name, eval_dataset in self.eval_dataset.items():
+                    dataset_metrics = self.evaluate(
+                        eval_dataset=eval_dataset,
+                        ignore_keys=ignore_keys_for_eval,
+                        metric_key_prefix=f"eval_{eval_dataset_name}",
+                    )
+                    metrics.update(dataset_metrics)
+            else:
+                metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+            self._report_to_hp_search(trial, self.state.global_step, metrics)
+
+            # Run delayed LR scheduler now that metrics are populated
+            if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                metric_to_check = self.args.metric_for_best_model
+                if not metric_to_check.startswith("eval_"):
+                    metric_to_check = f"eval_{metric_to_check}"
+                self.lr_scheduler.step(metrics[metric_to_check])
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial, metrics=metrics)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
@@ -655,9 +711,9 @@ class LocalTrainer(SFTTrainer):
             in_channels = layer.in_features
             out_channels = layer.out_features
             kappa = in_channels*out_channels/(in_channels+out_channels)
-            # rank = int(min(in_channels, out_channels)*0.95)
+            # rank = int(min(in_channels, out_channels)*0.95) 
             rank = int(kappa*self.kappa_factor)
-        setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), rank, 'eigen'))
+        setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), rank, self.algo))
         logger.info("Number of parameters:",sum(p.numel() for p in self.model.parameters()))
         self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
         self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)

@@ -11,13 +11,14 @@ from trainer import LocalTrainer
 import argparse
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='q,k,v')
+parser.add_argument("--layers", type=str, default='DenseReluDense.wi')
 parser.add_argument("--budget", type=float, default=0.5)
 parser.add_argument("--save_name", type=str, default=None)
+parser.add_argument("--algo", type=str, default='prune')
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'mnli_{args.budget}_{args.layers}_eigen'
+    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -54,9 +55,9 @@ training_args = TrainingArguments(
     logging_steps=1,
     lr_scheduler_type="constant",
     log_level="debug",
-    num_train_epochs=18,
+    num_train_epochs=100,
     save_strategy="epoch",
-    save_total_limit=10,
+    save_total_limit=1,
     learning_rate=1e-3,
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
@@ -69,6 +70,7 @@ trainer = LocalTrainer(
     tokenizer=tokenizer,
     args=training_args,
     layers=args.layers,
-    kappa_factor=0.5
+    kappa_factor=args.budget,
+    algo=args.algo
 )
 trainer.train()
