@@ -155,7 +155,7 @@ class ModuleInjection:
         return new_linear
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, model: nn.Module, index=None, layers=None):
+    def __init__(self, model: nn.Module, =None, layers=Noindexne):
         super().__init__()
         self.model = model
         idx = 0
@@ -168,7 +168,7 @@ class FeatureExtractor(nn.Module):
                         idx+=1
 
     def save_outputs_hook(self):
-        def fn(_, __, output):
+        def fn(module, input, output):
             self._features = output
         return fn
 
