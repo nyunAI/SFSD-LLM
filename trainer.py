@@ -83,10 +83,12 @@ class LocalTrainer(SFTTrainer):
         layers: str = "Attention.q,Attention.k,Attention.v,Attention.o,DenseReluDense.wi,DenseReluDense.wo",
         kappa_factor: float = 0.5,
         algo = 'eigen',
+        regress_weights = False
     ):
         self.layers = layers.split(',')
         self.kappa_factor = kappa_factor
         self.algo = algo
+        self.regress_weights = regress_weights
         super().__init__(
             model=model,
             args=args,
@@ -372,6 +374,9 @@ class LocalTrainer(SFTTrainer):
 
             step = -1
             for step, inputs in enumerate(epoch_iterator):
+                if self.algo == 'prune':
+                    if step == len(epoch_iterator)//2:
+                        self.hard_prune()
                 total_batched_samples += 1
                 if rng_to_sync:
                     self._load_rng_state(resume_from_checkpoint)
@@ -617,6 +622,21 @@ class LocalTrainer(SFTTrainer):
         student_feats = self.student_extractor(inputs)
 
         loss = nn.functional.mse_loss(teacher_feats, student_feats)
+
+        if self.regress_weights:
+            for (_,tl ), (_, sl) in self.teacher_extractor.model.named_modules(), self.model.named_modules():
+                if isinstance(sl, DecomposeLinearEigenPrune):
+                    if sl.weight1.requires_grad:
+                        loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).mean()
+
+        if self.algo=='prune':
+            sparse_weights = []
+            for name, param in self.student_extractor.named_parameters():
+                if param.requires_grad and 'zeta' in name:
+                    sparse_weights.append(param)
+            if len(sparse_weights):
+                loss += 100*torch.tensor([param.abs().mean() for param in sparse_weights]).mean()
+                    
         return loss
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
@@ -635,7 +655,7 @@ class LocalTrainer(SFTTrainer):
                 budgets = []
                 for name, l in self.model.named_modules():
                     if isinstance(l, DecomposeLinearEigenPrune):
-                        budget = l.prune_ratio()
+                        budget = l.budget
                         budgets.append(budget)
                 logs["budget"] = f'{budgets}'
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
@@ -673,6 +693,13 @@ class LocalTrainer(SFTTrainer):
             self._save_checkpoint(model, trial, metrics=metrics)
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
 
+    def hard_prune(self):
+        for _, l in self.model.named_modules():
+            if isinstance(l, DecomposeLinearEigenPrune):
+                if not l.pruned:
+                    l.set_threshold()
+                    l.pruned = True
+        
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
@@ -707,13 +734,7 @@ class LocalTrainer(SFTTrainer):
             param.requires_grad = False
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
-        if rank == 'auto':
-            in_channels = layer.in_features
-            out_channels = layer.out_features
-            kappa = in_channels*out_channels/(in_channels+out_channels)
-            # rank = int(min(in_channels, out_channels)*0.95) 
-            rank = int(kappa*self.kappa_factor)
-        setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), rank, self.algo))
+        setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), self.kappa_factor, self.algo))
         logger.info("Number of parameters:",sum(p.numel() for p in self.model.parameters()))
         self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
         self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)

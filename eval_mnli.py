@@ -9,14 +9,15 @@ import argparse
 import os
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='DenseReluDense.wi')
+parser.add_argument("--layers", type=str, default='Attention.q')
 parser.add_argument("--budget", type=float, default=0.5)
 parser.add_argument("--load_name", type=str, default=None)
 parser.add_argument("--baseline", type=bool, default=False)
+parser.add_argument("--algo", type=str, default='prune')
 args = parser.parse_args()
 
-device = "cuda"
-model = T5ForConditionalGeneration.from_pretrained("t5-small", device_map={"": 0})
+device = "cpu"
+model = T5ForConditionalGeneration.from_pretrained("t5-small", device_map="cpu")#{"": 0}, device)
 tokenizer = AutoTokenizer.from_pretrained(
     "t5-small", 
     trust_remote_code=True, 
@@ -32,7 +33,7 @@ dataset = dataset.map(preprocess_function)
 
 if not args.baseline:
     if args.load_name is None:
-        args.load_name_folder = f'./mnli_{args.budget}_{args.layers}_eigen/'
+        args.load_name_folder = f'./mnli_{args.budget}_{args.layers}_{args.algo}_slimming/'
         paths = os.listdir(args.load_name_folder)
         idx = 0
         max_ckpt = 0
@@ -40,7 +41,7 @@ if not args.baseline:
             if max_ckpt<int(path.split('-')[-1]):
                 max_ckpt = int(path.split('-')[-1])
                 idx = i
-        args.load_name = f'./mnli_{args.budget}_{args.layers}_eigen/{paths[idx]}/pytorch_model.bin'
+        args.load_name = f'./mnli_{args.budget}_{args.layers}_{args.algo}_slimming/{paths[idx]}/pytorch_model.bin'
 
     trainer = LocalTrainer(
         model=model,
@@ -49,7 +50,8 @@ if not args.baseline:
         train_dataset=dataset,
         dataset_text_field="text",
         layers=args.layers,
-        kappa_factor=args.budget
+        kappa_factor=args.budget,
+        algo=args.algo
     )
     checkpoint = torch.load(args.load_name)
 
