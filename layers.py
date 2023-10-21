@@ -281,14 +281,16 @@ class ModuleInjection:
         rank = int(kappa*budget)
         if method=='prune': #change to prune-eigen in next commit 
             new_linear = DecomposeLinearEigenPrune.from_linear(linear_module, linear_module.out_features, budget)
-        if method=='prune-svd':
+        elif method=='prune-svd':
             new_linear = DecomposeLinearSVDPrune.from_linear(linear_module, linear_module.out_features, budget)
         elif method=='prune-channel':
             new_linear = ChannelPrune.from_linear(linear_module, budget)
         elif method=='eigen':
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
-        else:
+        elif method=='svd':
             new_linear = DecomposeLinearSVD.from_linear(linear_module, rank)
+        else:
+            raise ValueError
         linear_module = None
         return new_linear
 

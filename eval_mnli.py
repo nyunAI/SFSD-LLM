@@ -4,7 +4,7 @@ import torch
 from tqdm import tqdm
 from datasets import load_dataset
 from trainer import LocalTrainer
-from layers import DecomposeLinearEigen
+from layers import DecomposeLinearEigen, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune
 import argparse
 import os
 
@@ -16,8 +16,8 @@ parser.add_argument("--baseline", type=bool, default=False)
 parser.add_argument("--algo", type=str, default='prune')
 args = parser.parse_args()
 
-device = "cpu"
-model = T5ForConditionalGeneration.from_pretrained("t5-small", device_map="cpu")#{"": 0}, device)
+device = "cuda"
+model = T5ForConditionalGeneration.from_pretrained("t5-small", device_map={"": 0})
 tokenizer = AutoTokenizer.from_pretrained(
     "t5-small", 
     trust_remote_code=True, 
@@ -62,10 +62,12 @@ if not args.baseline:
         if not idx in skip_idxs:
             trainer.decompose_layer(index=idx)
 
-    for name, layer in trainer.model.named_modules():
-        if isinstance(layer, DecomposeLinearEigen):
-            if hasattr(layer, 'init'):
-                layer.init = True
+    for name, l in trainer.model.named_modules():
+        if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
+            if hasattr(l, 'init'):
+                l.init = True
+            if hasattr(l, 'pruned'):
+                l.pruned = True
 
     trainer.model.load_state_dict(checkpoint)
     model = trainer.model
