@@ -45,7 +45,7 @@ if is_torch_tpu_available(check_device=False):
 if is_apex_available():
     from apex import amp
 
-from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune
+from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +374,7 @@ class LocalTrainer(SFTTrainer):
 
             step = -1
             for step, inputs in enumerate(epoch_iterator):
-                if self.algo == 'prune':
+                if 'prune' in self.algo:
                     if step == len(epoch_iterator)//2:
                         self.hard_prune()
                 total_batched_samples += 1
@@ -625,11 +625,11 @@ class LocalTrainer(SFTTrainer):
 
         if self.regress_weights:
             for (_,tl ), (_, sl) in self.teacher_extractor.model.named_modules(), self.model.named_modules():
-                if isinstance(sl, DecomposeLinearEigenPrune):
+                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune):
                     if sl.weight1.requires_grad:
                         loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).mean()
 
-        if self.algo=='prune':
+        if 'prune' in self.algo:
             sparse_weights = []
             for name, param in self.student_extractor.named_parameters():
                 if param.requires_grad and 'zeta' in name:
@@ -654,7 +654,7 @@ class LocalTrainer(SFTTrainer):
             if self.algo == 'prune':
                 budgets = []
                 for name, l in self.model.named_modules():
-                    if isinstance(l, DecomposeLinearEigenPrune):
+                    if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
                         budget = l.budget
                         budgets.append(budget)
                 logs["budget"] = f'{budgets}'
@@ -695,9 +695,8 @@ class LocalTrainer(SFTTrainer):
 
     def hard_prune(self):
         for _, l in self.model.named_modules():
-            if isinstance(l, DecomposeLinearEigenPrune):
+            if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
                 if not l.pruned:
-                    l.set_threshold()
                     l.pruned = True
         
     def reset_optimizer(self, index):

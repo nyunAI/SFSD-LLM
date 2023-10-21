@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import math
 
 class DecomposeLinearSVD(torch.nn.Linear):
     def __init__(self, in_features, out_features, rank, weight, bias):
@@ -9,7 +9,12 @@ class DecomposeLinearSVD(torch.nn.Linear):
             in_features=in_features, out_features=out_features
         )
         self.weight = weight
+        self.o_bias = bias
         self.bias = bias
+        if self.bias is None:
+            self.bias = nn.Parameter(
+            torch.zeros(out_features, requires_grad=True, device="cuda")
+        )
         self.weight1 = nn.Parameter(
             torch.zeros(rank, in_features, requires_grad=True, device="cuda")
         )
@@ -40,6 +45,7 @@ class DecomposeLinearSVD(torch.nn.Linear):
         new_linear.U = None
         new_linear.S = None
         new_linear.Vh = None
+        new_linear.bias.requires_grad = True
         new_linear.weight1.requires_grad = True
         new_linear.weight2.requires_grad = True
         return new_linear
@@ -54,7 +60,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
         self.o_bias = bias
         self.bias = bias
         if self.bias is None:
-            self.bias = self.weight2 = nn.Parameter(
+            self.bias = nn.Parameter(
             torch.zeros(out_features, requires_grad=True, device="cuda")
         )
         self.weight1 = nn.Parameter(
@@ -205,6 +211,60 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         new_linear.weight2.requires_grad = True
         new_linear.zeta.requires_grad = True
         return new_linear
+    
+class ChannelPrune(torch.nn.Linear):
+    def __init__(self, in_features, out_features, budget, weight, bias):
+        super(ChannelPrune, self).__init__(
+            in_features=in_features, out_features=out_features
+        )
+        self.weight = weight
+        self.o_bias = bias
+        self.bias = bias
+        if self.bias is None:
+            self.bias = nn.Parameter(
+            torch.zeros(out_features, requires_grad=True, device="cuda")
+        )
+        self.zeta = nn.Parameter(
+            torch.ones(1, out_features, requires_grad=True, device='cuda')
+        )
+        self.pruned = False
+        self.threshold = 0
+        self.target_budget = budget
+        self.budget = 1.0
+
+    def forward(self, input):
+        # z = self.get_zeta()
+        # self.set_threshold()
+        # self.set_budget()
+        # self.mask = self.zeta - self.zeta.detach() + (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
+        return F.linear(input, self.weight, self.bias)*self.get_mask()
+    
+    def set_threshold(self):
+        active_channels = int(math.sqrt(self.target_budget)*self.out_features) ## assuming for input channels are pruned in previous layer at same rate 
+        sorted, _ = torch.sort(self.zeta, 1, descending=True)
+        self.threshold = sorted[0][active_channels]
+    
+    def set_budget(self):
+        self.budget = ((self.zeta>self.threshold).sum()/self.rank).item()
+
+    def get_mask(self):
+        if self.pruned:
+            self.set_threshold()
+            self.set_budget()
+            self.zeta.requires_grad = False
+            return (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
+        else:
+            return self.zeta
+
+    @staticmethod
+    def from_linear(linear_module, budget):
+        new_linear = ChannelPrune(
+            linear_module.in_features, linear_module.out_features, budget, linear_module.weight, linear_module.bias
+        )
+        new_linear.bias.requires_grad = True
+        new_linear.weight.requires_grad = True
+        new_linear.zeta.requires_grad = True
+        return new_linear
 
 
 class ModuleInjection:
@@ -219,10 +279,12 @@ class ModuleInjection:
         out_channels = linear_module.out_features
         kappa = in_channels*out_channels/(in_channels+out_channels)
         rank = int(kappa*budget)
-        if method=='prune':
+        if method=='prune': #change to prune-eigen in next commit 
             new_linear = DecomposeLinearEigenPrune.from_linear(linear_module, linear_module.out_features, budget)
         if method=='prune-svd':
             new_linear = DecomposeLinearSVDPrune.from_linear(linear_module, linear_module.out_features, budget)
+        elif method=='prune-channel':
+            new_linear = ChannelPrune.from_linear(linear_module, budget)
         elif method=='eigen':
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
         else:

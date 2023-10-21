@@ -11,14 +11,15 @@ from trainer import LocalTrainer
 import argparse
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='DenseReluDense.wi')
+parser.add_argument("--layers", type=str, default='Attention.q')
 parser.add_argument("--budget", type=float, default=0.5)
 parser.add_argument("--save_name", type=str, default=None)
 parser.add_argument("--algo", type=str, default='prune')
+parser.add_argument("--regress_weights", type=bool, default=False)
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}'
+    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_slimming'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -45,7 +46,7 @@ def preprocess_function(sample):
     example['text'] = f"mnli premise: {sample['premise']} hypothesis: {sample['hypothesis']} target:"
     return example
 
-dataset = dataset.map(preprocess_function).select(range(50000))
+dataset = dataset.map(preprocess_function).select(range(100000))
 # dataset = dataset.map(preprocess_function, batched=True)
 
 training_args = TrainingArguments(
@@ -71,6 +72,7 @@ trainer = LocalTrainer(
     args=training_args,
     layers=args.layers,
     kappa_factor=args.budget,
-    algo=args.algo
+    algo=args.algo,
+    regress_weights=args.regress_weights
 )
 trainer.train()
