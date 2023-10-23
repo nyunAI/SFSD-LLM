@@ -241,11 +241,11 @@ class ChannelPrune(torch.nn.Linear):
     
     def set_threshold(self):
         active_channels = int(math.sqrt(self.target_budget)*self.out_features) ## assuming for input channels are pruned in previous layer at same rate 
-        sorted, _ = torch.sort(self.zeta, 1, descending=True)
+        sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
         self.threshold = sorted[0][active_channels]
     
     def set_budget(self):
-        self.budget = ((self.zeta>self.threshold).sum()/self.rank).item()
+        self.budget = ((self.zeta>self.threshold).sum()/self.out_features).item()
 
     def get_mask(self):
         if self.pruned:
@@ -279,7 +279,7 @@ class ModuleInjection:
         out_channels = linear_module.out_features
         kappa = in_channels*out_channels/(in_channels+out_channels)
         rank = int(kappa*budget)
-        if method=='prune': #change to prune-eigen in next commit 
+        if method=='prune-eigen': #change to prune-eigen in next commit 
             new_linear = DecomposeLinearEigenPrune.from_linear(linear_module, linear_module.out_features, budget)
         elif method=='prune-svd':
             new_linear = DecomposeLinearSVDPrune.from_linear(linear_module, linear_module.out_features, budget)

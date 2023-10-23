@@ -19,7 +19,7 @@ parser.add_argument("--regress_weights", type=bool, default=False)
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_slimming'
+    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_regree-weight={args.regress_weights}'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(

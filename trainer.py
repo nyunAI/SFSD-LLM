@@ -45,7 +45,7 @@ if is_torch_tpu_available(check_device=False):
 if is_apex_available():
     from apex import amp
 
-from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune
+from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune, DecomposeLinearEigen, DecomposeLinearSVD
 
 logger = logging.getLogger(__name__)
 
@@ -624,10 +624,13 @@ class LocalTrainer(SFTTrainer):
         loss = nn.functional.mse_loss(teacher_feats, student_feats)
 
         if self.regress_weights:
-            for (_,tl ), (_, sl) in self.teacher_extractor.model.named_modules(), self.model.named_modules():
-                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune):
+            for (_, sl) in self.model.named_modules():
+                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune) or isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
                     if sl.weight1.requires_grad:
-                        loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).mean()
+                        if sl.o_bias is not None:
+                            loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).mean()
+                        else:
+                            loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight)).mean()
 
         if 'prune' in self.algo:
             sparse_weights = []
@@ -651,7 +654,7 @@ class LocalTrainer(SFTTrainer):
 
             # reset tr_loss to zero
             tr_loss -= tr_loss
-            if self.algo == 'prune':
+            if 'prune' in self.algo:
                 budgets = []
                 for name, l in self.model.named_modules():
                     if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
