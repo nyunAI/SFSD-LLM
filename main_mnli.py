@@ -11,15 +11,16 @@ from trainer import LocalTrainer
 import argparse
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='Attention.q')
-parser.add_argument("--budget", type=float, default=0.5)
+parser.add_argument("--layers", type=str, default='Attention.o')
+parser.add_argument("--budget", default='auto')
 parser.add_argument("--save_name", type=str, default=None)
-parser.add_argument("--algo", type=str, default='prune')
-parser.add_argument("--regress_weights", type=bool, default=False)
+parser.add_argument("--algo", type=str, default='prune-eigen')
+parser.add_argument("--regress_weights", type=float, default=0.1)
+parser.add_argument("--sparsity", type=float, default=0.01)
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_regree-weight={args.regress_weights}'
+    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -73,6 +74,7 @@ trainer = LocalTrainer(
     layers=args.layers,
     kappa_factor=args.budget,
     algo=args.algo,
-    regress_weights=args.regress_weights
+    regress_weights=args.regress_weights,
+    sparsity=args.sparsity
 )
 trainer.train()

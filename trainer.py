@@ -81,14 +81,16 @@ class LocalTrainer(SFTTrainer):
         dataset_num_proc: Optional[int] = None,
         dataset_batch_size: int = 1000,
         layers: str = "Attention.q,Attention.k,Attention.v,Attention.o,DenseReluDense.wi,DenseReluDense.wo",
-        kappa_factor: float = 0.5,
+        kappa_factor = 0.5,
         algo = 'eigen',
-        regress_weights = False
+        regress_weights = 1,
+        sparsity = 1
     ):
         self.layers = layers.split(',')
         self.kappa_factor = kappa_factor
         self.algo = algo
         self.regress_weights = regress_weights
+        self.sparsity = sparsity
         super().__init__(
             model=model,
             args=args,
@@ -628,9 +630,9 @@ class LocalTrainer(SFTTrainer):
                 if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune) or isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
                     if sl.weight1.requires_grad:
                         if sl.o_bias is not None:
-                            loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).mean()
+                            loss += self.regress_weights*((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).pow(2).mean()
                         else:
-                            loss += ((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight)).mean()
+                            loss += self.regress_weights*((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight)).pow(2).mean()
 
         if 'prune' in self.algo:
             sparse_weights = []
@@ -638,7 +640,8 @@ class LocalTrainer(SFTTrainer):
                 if param.requires_grad and 'zeta' in name:
                     sparse_weights.append(param)
             if len(sparse_weights):
-                loss += 100*torch.tensor([param.abs().mean() for param in sparse_weights]).mean()
+                for weight in sparse_weights:
+                    loss += self.sparsity*weight.abs().mean()
                     
         return loss
 

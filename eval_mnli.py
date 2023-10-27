@@ -14,7 +14,8 @@ parser.add_argument("--budget", type=float, default=0.5)
 parser.add_argument("--load_name", type=str, default=None)
 parser.add_argument("--baseline", type=bool, default=False)
 parser.add_argument("--algo", type=str, default='prune')
-parser.add_argument("--regress_weights", type=bool, default=False)
+parser.add_argument("--regress_weights", type=float, default=0.1)
+parser.add_argument("--sparsity", type=float, default=0.01)
 args = parser.parse_args()
 
 device = "cuda"
@@ -34,7 +35,7 @@ dataset = dataset.map(preprocess_function)
 
 if not args.baseline:
     if args.load_name is None:
-        args.load_name_folder = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regree-weight={args.regress_weights}/'
+        args.load_name_folder = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
         paths = os.listdir(args.load_name_folder)
         idx = 0
         max_ckpt = 0
@@ -42,7 +43,7 @@ if not args.baseline:
             if max_ckpt<int(path.split('-')[-1]):
                 max_ckpt = int(path.split('-')[-1])
                 idx = i
-        args.load_name = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regree-weight={args.regress_weights}/{paths[idx]}/pytorch_model.bin'
+        args.load_name = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
 
     trainer = LocalTrainer(
         model=model,

@@ -168,6 +168,24 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         self.threshold = 0
         self.target_budget = budget
         self.budget = 1.0
+        self.active_ranks = None
+        self.kappa = self.in_features*self.out_features/(self.in_features+self.out_features)
+
+    def init_lowrank(self, input):
+        Y = F.linear(input, self.weight, self.bias).reshape(-1,self.weight.shape[0]) # BS, out
+        cov = torch.cov(torch.transpose(Y,1,0)) # out, out
+        E, V = torch.linalg.eig(cov) # out, out
+        if self.target_budget=='auto':
+            E = torch.cumsum(E.float(), 0)
+            self.active_ranks = torch.searchsorted(E, E[-1]*0.95).item()
+            self.target_budget = self.active_ranks/self.kappa
+        V = V[:,:self.rank].float() # out, rank
+        self.weight2.data = V.cuda()
+        self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
+        if self.bias is not None:
+            self.bias.data = (V @ torch.transpose(V,1,0) @ self.bias.data.unsqueeze(1)).squeeze(1).cuda()
+        self.init = True
+
 
     def forward(self, input):
         if not self.init:
@@ -183,20 +201,20 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         )
     
     def set_threshold(self):
-        kappa = self.in_features*self.out_features/(self.in_features+self.out_features)
-        active_ranks = int(kappa*self.target_budget)
-        sorted, _ = torch.sort(self.zeta, 1, descending=True)
-        self.threshold = sorted[0][active_ranks]
+        if not self.active_ranks:
+            self.active_ranks = int(self.kappa*self.target_budget)
+        sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
+        self.threshold = sorted[0][self.active_ranks]
     
     def set_budget(self):
-        self.budget = ((self.zeta>self.threshold).sum()/self.rank).item()
+        self.budget = ((self.zeta.abs()>self.threshold).sum()/self.rank).item()
 
     def get_mask(self):
         if self.pruned:
             self.set_threshold()
             self.set_budget()
             self.zeta.requires_grad = False
-            return (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
+            return (self.zeta.abs()>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
         else:
             return self.zeta
 
@@ -278,7 +296,6 @@ class ModuleInjection:
         in_channels = linear_module.in_features
         out_channels = linear_module.out_features
         kappa = in_channels*out_channels/(in_channels+out_channels)
-        rank = int(kappa*budget)
         if method=='prune-eigen': #change to prune-eigen in next commit 
             new_linear = DecomposeLinearEigenPrune.from_linear(linear_module, linear_module.out_features, budget)
         elif method=='prune-svd':
@@ -286,8 +303,10 @@ class ModuleInjection:
         elif method=='prune-channel':
             new_linear = ChannelPrune.from_linear(linear_module, budget)
         elif method=='eigen':
+            rank = int(kappa*budget)
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
         elif method=='svd':
+            rank = int(kappa*budget)
             new_linear = DecomposeLinearSVD.from_linear(linear_module, rank)
         else:
             raise ValueError
