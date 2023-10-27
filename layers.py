@@ -164,21 +164,23 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         self.zeta = nn.Parameter(
             torch.ones(1, rank, requires_grad=True, device='cuda')
         )
+        self.mask = nn.Parameter(
+            torch.ones(1, rank, requires_grad=False, device='cuda')
+        )
         self.pruned = False
-        self.threshold = 0
         self.target_budget = budget
-        self.budget = 1.0
-        self.active_ranks = None
-        self.kappa = self.in_features*self.out_features/(self.in_features+self.out_features)
 
     def init_lowrank(self, input):
         Y = F.linear(input, self.weight, self.bias).reshape(-1,self.weight.shape[0]) # BS, out
         cov = torch.cov(torch.transpose(Y,1,0)) # out, out
         E, V = torch.linalg.eig(cov) # out, out
-        if self.target_budget=='auto':
+        if 'auto' in self.target_budget:
+            variance = float(self.target_budget.split(':')[-1])
             E = torch.cumsum(E.float(), 0)
-            self.active_ranks = torch.searchsorted(E, E[-1]*0.95).item()
-            self.target_budget = self.active_ranks/self.kappa
+            self.active_ranks = torch.searchsorted(E, E[-1]*variance).item()
+            self.target_budget = self.active_ranks/(self.in_features*self.out_features/(self.in_features+self.out_features))
+        else:
+            self.active_ranks = int(self.in_features*self.out_features/(self.in_features+self.out_features)*self.target_budget)
         V = V[:,:self.rank].float() # out, rank
         self.weight2.data = V.cuda()
         self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
@@ -190,31 +192,21 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
     def forward(self, input):
         if not self.init:
             self.init_lowrank(input)
-        # z = self.get_zeta()
-        # self.set_threshold()
-        # self.set_budget()
-        # self.mask = self.zeta - self.zeta.detach() + (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
         return F.linear(
             F.linear(input, self.weight1, None)*self.get_mask(),
             self.weight2,
             self.bias,
         )
-    
-    def set_threshold(self):
-        if not self.active_ranks:
-            self.active_ranks = int(self.kappa*self.target_budget)
+
+    def hard_prune(self):
         sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
-        self.threshold = sorted[0][self.active_ranks]
-    
-    def set_budget(self):
-        self.budget = ((self.zeta.abs()>self.threshold).sum()/self.rank).item()
+        threshold = sorted[0][self.active_ranks]
+        self.mask.data = (self.zeta.abs()>threshold).to(self.zeta.device).to(self.zeta.dtype).data
+        self.pruned = True
 
     def get_mask(self):
         if self.pruned:
-            self.set_threshold()
-            self.set_budget()
-            self.zeta.requires_grad = False
-            return (self.zeta.abs()>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
+            return self.mask
         else:
             return self.zeta
 

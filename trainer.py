@@ -661,7 +661,7 @@ class LocalTrainer(SFTTrainer):
                 budgets = []
                 for name, l in self.model.named_modules():
                     if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
-                        budget = l.budget
+                        budget = l.target_budget
                         budgets.append(budget)
                 logs["budget"] = f'{budgets}'
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
@@ -703,7 +703,7 @@ class LocalTrainer(SFTTrainer):
         for _, l in self.model.named_modules():
             if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
                 if not l.pruned:
-                    l.pruned = True
+                    l.hard_prune()
         
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]

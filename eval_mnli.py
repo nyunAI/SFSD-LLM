@@ -9,11 +9,11 @@ import argparse
 import os
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='Attention.q')
-parser.add_argument("--budget", type=float, default=0.5)
+parser.add_argument("--layers", type=str, default='Attention.o')
+parser.add_argument("--budget", default='auto:0.99')
 parser.add_argument("--load_name", type=str, default=None)
 parser.add_argument("--baseline", type=bool, default=False)
-parser.add_argument("--algo", type=str, default='prune')
+parser.add_argument("--algo", type=str, default='prune-eigen')
 parser.add_argument("--regress_weights", type=float, default=0.1)
 parser.add_argument("--sparsity", type=float, default=0.01)
 args = parser.parse_args()

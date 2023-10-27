@@ -12,7 +12,7 @@ import argparse
 
 parser = argparse.ArgumentParser("main")
 parser.add_argument("--layers", type=str, default='Attention.o')
-parser.add_argument("--budget", default='auto')
+parser.add_argument("--budget", default='auto:0.99')
 parser.add_argument("--save_name", type=str, default=None)
 parser.add_argument("--algo", type=str, default='prune-eigen')
 parser.add_argument("--regress_weights", type=float, default=0.1)
