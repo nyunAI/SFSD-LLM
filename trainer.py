@@ -630,9 +630,9 @@ class LocalTrainer(SFTTrainer):
                 if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune) or isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
                     if sl.weight1.requires_grad:
                         if sl.o_bias is not None:
-                            loss += self.regress_weights*((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight + sl.o_bias)).pow(2).mean()
+                            loss += self.regress_weights*((sl.weight2 * sl.get_mask() @ sl.weight1 + sl.bias[:,None]) - (sl.weight + sl.o_bias)).pow(2).mean()
                         else:
-                            loss += self.regress_weights*((sl.weight2 @ sl.weight1 + sl.bias) - (sl.weight)).pow(2).mean()
+                            loss += self.regress_weights*((sl.weight2 * sl.get_mask() @ sl.weight1 + sl.bias[:,None]) - (sl.weight)).pow(2).mean()
 
         if 'prune' in self.algo:
             sparse_weights = []
