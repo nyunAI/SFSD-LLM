@@ -7,6 +7,7 @@ from trainer import LocalTrainer
 from layers import DecomposeLinearEigen, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune, DecomposeLinearSVD
 import argparse
 import os
+from scipy import stats
 
 parser = argparse.ArgumentParser("main")
 parser.add_argument("--layers", type=str, default='Attention.q')
@@ -16,6 +17,7 @@ parser.add_argument("--baseline", type=bool, default=False)
 parser.add_argument("--algo", type=str, default='prune')
 parser.add_argument("--regress_weights", type=float, default=0.1)
 parser.add_argument("--sparsity", type=float, default=0.01)
+parser.add_argument("--dataset", type=str, default='mnli')
 args = parser.parse_args()
 
 device = "cuda"
@@ -26,16 +28,53 @@ tokenizer = AutoTokenizer.from_pretrained(
     torch_dtype="auto",
 )
 tokenizer.pad_token = tokenizer.eos_token
-dataset = load_dataset("multi_nli", split="validation_matched")
-def preprocess_function(sample):
+def preprocess_function_mnli(sample):
     example = {}
     example['text'] = f"mnli premise: {sample['premise']} hypothesis: {sample['hypothesis']} target:"
     return example
+
+def preprocess_function_boolq(sample):
+   example = {}
+   example['text'] = f"question: {sample['question']} passage: {sample['passage']}  answer:"
+   return example
+
+def preprocess_function_sst2(sample):
+   example = {}
+   example['text'] = f"sst2 sentence: {sample['sentence']} label:"
+   return example
+
+def preprocess_function_stsb(sample):
+   example = {}
+   example['text'] = f"stsb sentence1: {sample['sentence1']} sentence2: {sample['sentence2']} label:"
+   return example
+
+if(args.dataset=='mnli'):
+  dataset = load_dataset("multi_nli", split="validation_matched")
+  preprocess_function = preprocess_function_mnli
+  label_map = ["entailment", "neutral", "contradiction"]  # Add more labels as needed
+  # Map the label names to integers for comparison
+  true_labels = [label_map[example['label']] for example in dataset]
+  
+elif(args.dataset=="boolq"):
+  dataset = load_dataset("boolq", split="validation")
+  preprocess_function = preprocess_function_boolq
+  true_labels = ["True" if example['answer'] else 'False' for example in dataset] 
+
+elif(args.dataset=="sst2"):
+  dataset = load_dataset("sst2", split="validation")
+  preprocess_function = preprocess_function_sst2
+  true_labels = ["postive" if example['label'] == 1 else 'negative' for example in dataset]
+
+elif(args.dataset=='stsb'):
+   dataset = load_dataset("glue", "stsb", split = "validation")
+   preprocess_function = preprocess_function_stsb
+   true_labels = [example['label'] for example in dataset]
+
 dataset = dataset.map(preprocess_function)
 
 if not args.baseline:
     if args.load_name is None:
-        args.load_name_folder = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
+        args.load_name_folder = f'./{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
         paths = os.listdir(args.load_name_folder)
         idx = 0
         max_ckpt = 0
@@ -43,7 +82,7 @@ if not args.baseline:
             if max_ckpt<int(path.split('-')[-1]):
                 max_ckpt = int(path.split('-')[-1])
                 idx = i
-        args.load_name = f'./mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
+        args.load_name = f'./{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
 
     trainer = LocalTrainer(
         model=model,
@@ -74,7 +113,7 @@ if not args.baseline:
     trainer.model.load_state_dict(checkpoint)
     model = trainer.model
     
-label_map = ["entailment", "neutral", "contradiction"]  # Add more labels as needed
+
 predictions = []
 # Forward pass
 for sample in tqdm(dataset):
@@ -91,10 +130,20 @@ for sample in tqdm(dataset):
         prediction = tokenizer.decode(logits[0][1:-1])
         predictions.append(prediction)
 
-# Map the label names to integers for comparison
-true_labels = [label_map[example['label']] for example in dataset]
 
+def is_number(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
 # Calculate accuracy
-accuracy = accuracy_score(true_labels, predictions)
+if(args.dataset=='stsb'):
+    predictions = [float(x) if is_number(x) else 2.5 for x in predictions]
+    res = stats.spearmanr(predictions, true_labels)
+    print(f"args: {args}, SpearmanCorrelationCoefficient: {res}")
+else:
+    accuracy = accuracy_score(true_labels, predictions)
+    print(f"args: {args}, Accuracy: {accuracy}")
 
-print(f"args: {args}, Accuracy: {accuracy}")
+

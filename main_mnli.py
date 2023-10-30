@@ -17,10 +17,11 @@ parser.add_argument("--save_name", type=str, default=None)
 parser.add_argument("--algo", type=str, default='prune-eigen')
 parser.add_argument("--regress_weights", type=float, default=0.1)
 parser.add_argument("--sparsity", type=float, default=0.01)
+parser.add_argument('--dataset', type=str, default = 'mnli')
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'mnli_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}'
+    args.save_name = f'{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -39,20 +40,57 @@ tokenizer = AutoTokenizer.from_pretrained(
 tokenizer.pad_token = tokenizer.eos_token
 # dataset = load_dataset("imdb", split="train")
 # dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
-dataset = load_dataset("multi_nli", split="train")
 # dataset = load_dataset("multi_nli", split="validation_matched")
 
-def preprocess_function(sample):
+
+
+def preprocess_function_mnli(sample):
     example = {}
     example['text'] = f"mnli premise: {sample['premise']} hypothesis: {sample['hypothesis']} target:"
     return example
 
-dataset = dataset.map(preprocess_function).select(range(100000))
+def preprocess_function_boolq(sample):
+   example = {}
+   example['text'] = f"question: {sample['question']} passage: {sample['passage']}  answer:"
+   return example
+
+def preprocess_function_sst2(sample):
+   example = {}
+   example['text'] = f"sst2 sentence: {sample['sentence']} label:"
+   return example
+
+def preprocess_function_stsb(sample):
+   example = {}
+   example['text'] = f"stsb sentence1: {sample['sentence1']} sentence2: {sample['sentence2']} label:"
+   return example
+
+if(args.dataset=='mnli'):
+  dataset = load_dataset("multi_nli", split="train")
+  preprocess_function = preprocess_function_mnli
+  ind = range(100000)
+
+elif(args.dataset=="boolq"):
+  dataset = load_dataset("boolq", split="train")
+  preprocess_function = preprocess_function_boolq
+  ind = range(2500)
+
+elif(args.dataset=='sst2'):
+   dataset = load_dataset("sst2", split = "train")
+   preprocess_function = preprocess_function_sst2
+   ind = range(17000)
+
+elif(args.dataset=='stsb'):
+   dataset = load_dataset("glue", "stsb", split = "train")
+   preprocess_function = preprocess_function_stsb
+   ind = range(1400)
+
+
+dataset = dataset.map(preprocess_function).select(ind)
 # dataset = dataset.map(preprocess_function, batched=True)
 
 training_args = TrainingArguments(
     output_dir=f"{args.save_name}",
-    per_device_train_batch_size=32,
+    per_device_train_batch_size=4,
     gradient_accumulation_steps=1,
     logging_steps=1,
     lr_scheduler_type="constant",
