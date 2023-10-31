@@ -708,7 +708,7 @@ class LocalTrainer(SFTTrainer):
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
-        self.optimizer = torch.optim.Adam(layer.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(layer.parameters(), lr=self.args.learning_rate)
 
     def decomposer_init(self):
         self.teacher = copy.deepcopy(self.model)
@@ -740,7 +740,6 @@ class LocalTrainer(SFTTrainer):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
         setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), self.kappa_factor, self.algo))
-        logger.info("Number of parameters:",sum(p.numel() for p in self.model.parameters()))
         self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
         self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)
 

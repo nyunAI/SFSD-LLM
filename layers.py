@@ -301,7 +301,9 @@ class ModuleInjection:
             rank = int(kappa*budget)
             new_linear = DecomposeLinearSVD.from_linear(linear_module, rank)
         else:
-            raise ValueError
+            for name, param in linear_module.named_parameters():
+                param.requires_grad = True
+            new_linear = linear_module
         linear_module = None
         return new_linear
 
