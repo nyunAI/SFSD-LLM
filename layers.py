@@ -9,12 +9,6 @@ class DecomposeLinearSVD(torch.nn.Linear):
             in_features=in_features, out_features=out_features
         )
         self.weight = weight
-        self.o_bias = bias
-        self.bias = bias
-        if self.bias is None:
-            self.bias = nn.Parameter(
-            torch.zeros(out_features, requires_grad=True, device="cuda")
-        )
         self.weight1 = nn.Parameter(
             torch.zeros(rank, in_features, requires_grad=True, device="cuda")
         )
@@ -32,7 +26,7 @@ class DecomposeLinearSVD(torch.nn.Linear):
         return F.linear(
             F.linear(input, self.weight1, None),
             self.weight2,
-            self.bias,
+            None,
         )
 
     @staticmethod
@@ -45,7 +39,6 @@ class DecomposeLinearSVD(torch.nn.Linear):
         new_linear.U = None
         new_linear.S = None
         new_linear.Vh = None
-        new_linear.bias.requires_grad = True
         new_linear.weight1.requires_grad = True
         new_linear.weight2.requires_grad = True
         return new_linear
@@ -57,12 +50,6 @@ class DecomposeLinearEigen(torch.nn.Linear):
         )
         self.init = False
         self.weight = weight
-        self.o_bias = bias
-        self.bias = bias
-        if self.bias is None:
-            self.bias = nn.Parameter(
-            torch.zeros(out_features, requires_grad=True, device="cuda")
-        )
         self.weight1 = nn.Parameter(
             torch.zeros(rank, in_features, requires_grad=True, device="cuda")
         )
@@ -72,14 +59,12 @@ class DecomposeLinearEigen(torch.nn.Linear):
         self.rank = rank
 
     def init_lowrank(self, input):
-        Y = F.linear(input, self.weight, self.bias).reshape(-1,self.weight.shape[0]) # BS, out
+        Y = F.linear(input, self.weight, None).reshape(-1,self.weight.shape[0]) # BS, out
         cov = torch.cov(torch.transpose(Y,1,0)) # out, out
         _, V = torch.linalg.eig(cov) # out, out
         V = V[:,:self.rank].float() # out, rank
         self.weight2.data = V.cuda()
         self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
-        if self.bias is not None:
-            self.bias.data = (V @ torch.transpose(V,1,0) @ self.bias.data.unsqueeze(1)).squeeze(1).cuda()
         self.init = True
 
     def forward(self, input):
@@ -88,7 +73,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
         return F.linear(
             F.linear(input, self.weight1, None),
             self.weight2,
-            self.bias,
+            None,
         )
 
     @staticmethod
@@ -97,7 +82,6 @@ class DecomposeLinearEigen(torch.nn.Linear):
             linear_module.in_features, linear_module.out_features, rank, linear_module.weight, linear_module.bias
         )
         # new_linear.weight = None
-        new_linear.bias.requires_grad = True
         new_linear.weight1.requires_grad = True
         new_linear.weight2.requires_grad = True
         return new_linear
@@ -123,7 +107,7 @@ class DecomposeLinearSVDPrune(DecomposeLinearSVD):
         return F.linear(
             F.linear(input, self.weight1, None)*self.get_mask(),
             self.weight2,
-            self.bias,
+            None,
         )
     
     def set_threshold(self):
@@ -150,7 +134,6 @@ class DecomposeLinearSVDPrune(DecomposeLinearSVD):
             linear_module.in_features, linear_module.out_features, rank, budget, linear_module.weight, linear_module.bias
         )
         # new_linear.weight = None
-        new_linear.bias.requires_grad = True
         new_linear.weight1.requires_grad = True
         new_linear.weight2.requires_grad = True
         new_linear.zeta.requires_grad = True
@@ -171,7 +154,7 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         self.target_budget = budget
 
     def init_lowrank(self, input):
-        Y = F.linear(input, self.weight, self.bias).reshape(-1,self.weight.shape[0]) # BS, out
+        Y = F.linear(input, self.weight, None).reshape(-1,self.weight.shape[0]) # BS, out
         cov = torch.cov(torch.transpose(Y,1,0)) # out, out
         E, V = torch.linalg.eig(cov) # out, out
         if 'auto' in self.target_budget:
@@ -184,8 +167,6 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         V = V[:,:self.rank].float() # out, rank
         self.weight2.data = V.cuda()
         self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
-        if self.bias is not None:
-            self.bias.data = (V @ torch.transpose(V,1,0) @ self.bias.data.unsqueeze(1)).squeeze(1).cuda()
         self.init = True
 
 
@@ -195,13 +176,14 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         return F.linear(
             F.linear(input, self.weight1, None)*self.get_mask(),
             self.weight2,
-            self.bias,
+            None,
         )
 
     def hard_prune(self):
         sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
         threshold = sorted[0][self.active_ranks]
-        self.mask.data = (self.zeta.abs()>threshold).to(self.zeta.device).to(self.zeta.dtype).data
+        self.mask.data = (self.zeta.abs()>=threshold).to(self.zeta.device).to(self.zeta.dtype).data
+        self.target_budget = (self.mask.sum()/(self.in_features*self.out_features/(self.in_features+self.out_features))).item()
         self.pruned = True
 
     def get_mask(self):
@@ -216,7 +198,6 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
             linear_module.in_features, linear_module.out_features, rank, budget, linear_module.weight, linear_module.bias
         )
         # new_linear.weight = None
-        new_linear.bias.requires_grad = True
         new_linear.weight1.requires_grad = True
         new_linear.weight2.requires_grad = True
         new_linear.zeta.requires_grad = True
@@ -228,12 +209,6 @@ class ChannelPrune(torch.nn.Linear):
             in_features=in_features, out_features=out_features
         )
         self.weight = weight
-        self.o_bias = bias
-        self.bias = bias
-        if self.bias is None:
-            self.bias = nn.Parameter(
-            torch.zeros(out_features, requires_grad=True, device="cuda")
-        )
         self.zeta = nn.Parameter(
             torch.ones(1, out_features, requires_grad=True, device='cuda')
         )
@@ -247,7 +222,7 @@ class ChannelPrune(torch.nn.Linear):
         # self.set_threshold()
         # self.set_budget()
         # self.mask = self.zeta - self.zeta.detach() + (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
-        return F.linear(input, self.weight, self.bias)*self.get_mask()
+        return F.linear(input, self.weight, None)*self.get_mask()
     
     def set_threshold(self):
         active_channels = int(math.sqrt(self.target_budget)*self.out_features) ## assuming for input channels are pruned in previous layer at same rate 
@@ -255,14 +230,14 @@ class ChannelPrune(torch.nn.Linear):
         self.threshold = sorted[0][active_channels]
     
     def set_budget(self):
-        self.budget = ((self.zeta>self.threshold).sum()/self.out_features).item()
+        self.budget = ((self.zeta>=self.threshold).sum()/self.out_features).item()
 
     def get_mask(self):
         if self.pruned:
             self.set_threshold()
             self.set_budget()
             self.zeta.requires_grad = False
-            return (self.zeta>self.threshold).to(self.zeta.device).to(self.zeta.dtype)
+            return (self.zeta>=self.threshold).to(self.zeta.device).to(self.zeta.dtype)
         else:
             return self.zeta
 
@@ -271,7 +246,6 @@ class ChannelPrune(torch.nn.Linear):
         new_linear = ChannelPrune(
             linear_module.in_features, linear_module.out_features, budget, linear_module.weight, linear_module.bias
         )
-        new_linear.bias.requires_grad = True
         new_linear.weight.requires_grad = True
         new_linear.zeta.requires_grad = True
         return new_linear

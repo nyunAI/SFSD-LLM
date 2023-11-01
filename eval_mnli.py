@@ -63,7 +63,7 @@ elif(args.dataset=="boolq"):
 elif(args.dataset=="sst2"):
   dataset = load_dataset("sst2", split="validation")
   preprocess_function = preprocess_function_sst2
-  true_labels = ["postive" if example['label'] == 1 else 'negative' for example in dataset]
+  true_labels = ["positive" if example['label'] == 1 else 'negative' for example in dataset]
 
 elif(args.dataset=='stsb'):
    dataset = load_dataset("glue", "stsb", split = "validation")
@@ -74,7 +74,7 @@ dataset = dataset.map(preprocess_function)
 
 if not args.baseline:
     if args.load_name is None:
-        args.load_name_folder = f'./{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
+        args.load_name_folder = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
         paths = os.listdir(args.load_name_folder)
         idx = 0
         max_ckpt = 0
@@ -82,7 +82,7 @@ if not args.baseline:
             if max_ckpt<int(path.split('-')[-1]):
                 max_ckpt = int(path.split('-')[-1])
                 idx = i
-        args.load_name = f'./{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
+        args.load_name = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
 
     trainer = LocalTrainer(
         model=model,
