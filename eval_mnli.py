@@ -10,14 +10,14 @@ import os
 from scipy import stats
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default='Attention.o')
-parser.add_argument("--budget", default='auto:0.99')
+parser.add_argument("--layers", type=str, default='Attention.q,Attention.k,Attention.v,Attention.o,DenseReluDense.wi,DenseReluDense.wo')
+parser.add_argument("--budget", default='auto:0.95')
 parser.add_argument("--load_name", type=str, default=None)
 parser.add_argument("--baseline", type=bool, default=False)
 parser.add_argument("--algo", type=str, default='prune-eigen')
 parser.add_argument("--regress_weights", type=float, default=0.1)
-parser.add_argument("--sparsity", type=float, default=0.01)
-parser.add_argument("--dataset", type=str, default='mnli')
+parser.add_argument("--sparsity", type=float, default=0.001)
+parser.add_argument("--dataset", type=str, default='sst2')
 args = parser.parse_args()
 
 device = "cuda"
@@ -74,7 +74,7 @@ dataset = dataset.map(preprocess_function)
 
 if not args.baseline:
     if args.load_name is None:
-        args.load_name_folder = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
+        args.load_name_folder = f'data_aware/models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/'
         paths = os.listdir(args.load_name_folder)
         idx = 0
         max_ckpt = 0
@@ -82,7 +82,7 @@ if not args.baseline:
             if max_ckpt<int(path.split('-')[-1]):
                 max_ckpt = int(path.split('-')[-1])
                 idx = i
-        args.load_name = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
+        args.load_name = f'data_aware/models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}/{paths[idx]}/pytorch_model.bin'
 
     trainer = LocalTrainer(
         model=model,
@@ -103,13 +103,19 @@ if not args.baseline:
         if not idx in skip_idxs:
             trainer.decompose_layer(index=idx)
 
+    mask_ckpt = {}
+    for key in checkpoint:
+        if 'mask' in key:
+            mask_ckpt[key] = checkpoint[key]
+    trainer.model.load_state_dict(mask_ckpt, strict = False)
+
     for name, l in trainer.model.named_modules():
         if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune) or isinstance(l, DecomposeLinearEigen) or isinstance(l, DecomposeLinearSVD):
             if hasattr(l, 'init'):
                 l.init = True
             if hasattr(l, 'pruned'):
-                l.pruned = True
-
+                l.hard_prune(False)
+                
     trainer.model.load_state_dict(checkpoint)
     model = trainer.model
     
