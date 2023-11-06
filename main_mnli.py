@@ -38,6 +38,19 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True,
     torch_dtype="auto",
 )
+# model = AutoModelForCausalLM.from_pretrained(
+#     "EleutherAI/gpt-neo-125m",
+#     # quantization_config=bnb_config,
+#     device_map={"": 0},
+#     trust_remote_code=True,
+#     use_auth_token=True,
+# )
+
+# tokenizer = AutoTokenizer.from_pretrained(
+#     "EleutherAI/gpt-neo-125m", 
+#     trust_remote_code=True, 
+#     torch_dtype="auto",
+# )
 tokenizer.pad_token = tokenizer.eos_token
 # dataset = load_dataset("imdb", split="train")
 # dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
@@ -65,11 +78,15 @@ def preprocess_function_stsb(sample):
    example['text'] = f"stsb sentence1: {sample['sentence1']} sentence2: {sample['sentence2']} label:"
    return example
 
+def preprocess_function_hellaswag(sample):
+   example = {}
+   example['text'] = sample['ctx']
+
 if(args.dataset=='mnli'):
   dataset = load_dataset("multi_nli", split="train")
   preprocess_function = preprocess_function_mnli
   ind = range(100000)
-  dataset.select(ind)
+  dataset = dataset.select(ind)
 
 elif(args.dataset=="boolq"):
   dataset = load_dataset("boolq", split="train")
@@ -83,6 +100,9 @@ elif(args.dataset=='stsb'):
    dataset = load_dataset("glue", "stsb", split = "train")
    preprocess_function = preprocess_function_stsb
 
+elif(args.dataset=='hellaswag'):
+   dataset = load_dataset("Rowan/hellaswag", split = "train")
+   preprocess_function = preprocess_function_hellaswag
 
 dataset = dataset.map(preprocess_function)#.select(ind)
 # dataset = dataset.map(preprocess_function, batched=True)
