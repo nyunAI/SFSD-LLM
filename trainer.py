@@ -629,7 +629,10 @@ class LocalTrainer(SFTTrainer):
             for (_, sl) in self.model.named_modules():
                 if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune) or isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
                     if sl.weight1.requires_grad:
-                        loss += self.regress_weights*((sl.weight1.transpose(1,0) * sl.get_mask() @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
+                        if sl.pruned:
+                            loss += self.regress_weights*((sl.weight1.transpose(1,0) @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
+                        else:
+                            loss += self.regress_weights*((sl.weight1.transpose(1,0) * sl.get_mask() @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
                         # loss += self.regress_weights*((sl.weight2 * sl.get_mask().transpose(1,0) @ sl.weight1) - (sl.weight)).pow(2).mean()
 
         if 'prune' in self.algo:

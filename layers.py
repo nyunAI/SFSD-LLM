@@ -168,22 +168,32 @@ class DecomposeLinearEigenPrune(DecomposeLinearEigen):
         self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
         self.init = True
 
-
     def forward(self, input):
         if not self.init:
             self.init_lowrank(input)
+        if self.pruned:
+            return F.linear(
+                F.linear(input, self.weight1, None),
+                self.weight2,
+                None,
+            )
         return F.linear(
             F.linear(input, self.weight1, None)*self.get_mask(),
             self.weight2,
             None,
         )
 
-    def hard_prune(self):
-        sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
-        threshold = sorted[0][self.active_ranks]
-        self.mask.data = (self.zeta.abs()>=threshold).to(self.zeta.device).to(self.zeta.dtype).data
+    def hard_prune(self, calculate=True):
+        if calculate:
+            sorted, _ = torch.sort(self.zeta.abs(), 1, descending=True)
+            threshold = sorted[0][self.active_ranks]
+            self.mask.data = (self.zeta.abs()>=threshold).to(self.zeta.device).to(self.zeta.dtype)
+            self.mask.requires_grad = False
         self.target_budget = (self.mask.sum()/(self.in_features*self.out_features/(self.in_features+self.out_features))).item()
         self.pruned = True
+        self.mask_indexes = torch.nonzero(self.mask)[:,1]
+        self.weight1 = torch.nn.Parameter(self.weight1.data[self.mask_indexes,:])
+        self.weight2 = torch.nn.Parameter(self.weight2.data[:,self.mask_indexes])
 
     def get_mask(self):
         if self.pruned:
