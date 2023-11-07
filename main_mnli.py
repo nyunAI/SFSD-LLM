@@ -94,6 +94,7 @@ elif(args.dataset=="boolq"):
 
 elif(args.dataset=='sst2'):
    dataset = load_dataset("sst2", split = "train")
+   dataset_eval = load_dataset("sst2", split = "validation")
    preprocess_function = preprocess_function_sst2
 
 elif(args.dataset=='stsb'):
@@ -104,7 +105,8 @@ elif(args.dataset=='hellaswag'):
    dataset = load_dataset("Rowan/hellaswag", split = "train")
    preprocess_function = preprocess_function_hellaswag
 
-dataset = dataset.map(preprocess_function)#.select(ind)
+dataset = dataset.map(preprocess_function)
+dataset_eval = dataset_eval.map(preprocess_function)#.select(ind)
 # dataset = dataset.map(preprocess_function, batched=True)
 
 training_args = TrainingArguments(
@@ -120,10 +122,12 @@ training_args = TrainingArguments(
     learning_rate=1e-3,
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
+    evaluation_strategy='epoch',
 )
 trainer = LocalTrainer(
     model=base_model,
     train_dataset=dataset,
+    eval_dataset=dataset_eval,
     dataset_text_field="text",
     max_seq_length=2048,
     tokenizer=tokenizer,

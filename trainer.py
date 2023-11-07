@@ -1,4 +1,6 @@
 from trl import SFTTrainer
+from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 import warnings
 import logging
 import math
@@ -91,6 +93,7 @@ class LocalTrainer(SFTTrainer):
         self.algo = algo
         self.regress_weights = regress_weights
         self.sparsity = sparsity
+        self.true_labels = ["positive" if example['label'] == 1 else 'negative' for example in eval_dataset]
         super().__init__(
             model=model,
             args=args,
@@ -627,13 +630,15 @@ class LocalTrainer(SFTTrainer):
 
         if self.regress_weights:
             for (_, sl) in self.model.named_modules():
-                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune) or isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
+                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune):
                     if sl.weight1.requires_grad:
                         if sl.pruned:
                             loss += self.regress_weights*((sl.weight1.transpose(1,0) @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
                         else:
                             loss += self.regress_weights*((sl.weight1.transpose(1,0) * sl.get_mask() @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
-                        # loss += self.regress_weights*((sl.weight2 * sl.get_mask().transpose(1,0) @ sl.weight1) - (sl.weight)).pow(2).mean()
+                elif isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
+                    if sl.weight1.requires_grad:
+                        loss += self.regress_weights*((sl.weight1.transpose(1,0) @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
 
         if 'prune' in self.algo:
             sparse_weights = []
@@ -676,18 +681,21 @@ class LocalTrainer(SFTTrainer):
 
         metrics = None
         if self.control.should_evaluate:
-            if isinstance(self.eval_dataset, dict):
-                metrics = {}
-                for eval_dataset_name, eval_dataset in self.eval_dataset.items():
-                    dataset_metrics = self.evaluate(
-                        eval_dataset=eval_dataset,
-                        ignore_keys=ignore_keys_for_eval,
-                        metric_key_prefix=f"eval_{eval_dataset_name}",
-                    )
-                    metrics.update(dataset_metrics)
-            else:
-                metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
-            self._report_to_hp_search(trial, self.state.global_step, metrics)
+            predictions = []
+            metrics = {}
+            for inputs in self.eval_dataset:
+                with torch.no_grad():
+                    inputs = self._prepare_inputs(inputs)['input_ids']
+
+                    logits = self.model.generate(torch.tensor(inputs).cuda()[None, :],
+                                                do_sample=True,
+                                                max_length=3
+                                                )
+                    prediction = self.tokenizer.decode(logits[0][1:-1])
+                    predictions.append(prediction)
+            accuracy = accuracy_score(self.true_labels, predictions)
+            metrics['eval_acc'] = accuracy
+            self.log(metrics)
 
             # Run delayed LR scheduler now that metrics are populated
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
