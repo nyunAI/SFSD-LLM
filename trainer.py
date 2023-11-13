@@ -1,5 +1,6 @@
 from trl import SFTTrainer
 from sklearn.metrics import accuracy_score
+import pickle
 from tqdm import tqdm
 import warnings
 import logging
@@ -86,14 +87,15 @@ class LocalTrainer(SFTTrainer):
         kappa_factor = 0.5,
         algo = 'eigen',
         regress_weights = 1,
-        sparsity = 1
+        sparsity = 1,
+        true_labels = None,
     ):
         self.layers = layers.split(',')
         self.kappa_factor = kappa_factor
         self.algo = algo
         self.regress_weights = regress_weights
         self.sparsity = sparsity
-        self.true_labels = ["positive" if example['label'] == 1 else 'negative' for example in eval_dataset]
+        self.true_labels = true_labels
         super().__init__(
             model=model,
             args=args,
@@ -326,6 +328,7 @@ class LocalTrainer(SFTTrainer):
         # This should be the same if the state has been saved but in case the training arguments changed, it's safer
         # to set this after the load.
         self.decomposer_init()
+        # self.get_budget()
         max_steps = max_steps/num_train_epochs*len(self.decomposable_layers)
         num_train_epochs = len(self.decomposable_layers)
         self.state.max_steps = int(max_steps)
@@ -663,13 +666,14 @@ class LocalTrainer(SFTTrainer):
 
             # reset tr_loss to zero
             tr_loss -= tr_loss
-            if 'prune' in self.algo:
-                budgets = []
-                for name, l in self.model.named_modules():
-                    if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
-                        budget = l.target_budget
-                        budgets.append(budget)
-                logs["budget"] = f'{budgets}'
+            # if 'prune' in self.algo:
+            budgets = []
+            for name, l in self.model.named_modules():
+                if hasattr(l, 'target_budget'):
+                # if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
+                    budget = l.target_budget
+                    budgets.append(budget)
+            logs["budget"] = f'{budgets}'
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
             logs["learning_rate"] = self._get_learning_rate()
 
@@ -681,20 +685,7 @@ class LocalTrainer(SFTTrainer):
 
         metrics = None
         if self.control.should_evaluate:
-            predictions = []
-            metrics = {}
-            for inputs in self.eval_dataset:
-                with torch.no_grad():
-                    inputs = self._prepare_inputs(inputs)['input_ids']
-
-                    logits = self.model.generate(torch.tensor(inputs).cuda()[None, :],
-                                                do_sample=True,
-                                                max_length=3
-                                                )
-                    prediction = self.tokenizer.decode(logits[0][1:-1])
-                    predictions.append(prediction)
-            accuracy = accuracy_score(self.true_labels, predictions)
-            metrics['eval_acc'] = accuracy
+            metrics = self.custom_evaluate()
             self.log(metrics)
 
             # Run delayed LR scheduler now that metrics are populated
@@ -751,6 +742,70 @@ class LocalTrainer(SFTTrainer):
         setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), self.kappa_factor, self.algo))
         self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
         self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)
+
+    def get_budget(self):
+        self.ranks = []
+        train_dataloader = self.get_train_dataloader()
+        for _, param in self.model.named_parameters():
+            param.requires_grad = False
+        global_accs = []
+        for index in tqdm(range(len(self.decomposable_layers))):
+            parent_layer, last_token = self.decomposable_layers[index]
+            layer = copy.deepcopy(getattr(parent_layer, last_token))
+            setattr(parent_layer, last_token, ModuleInjection.make_decomposable(layer, layer.out_features, self.algo))
+        for inputs in train_dataloader:
+            inputs = self._prepare_inputs(inputs)
+            _ = self.model(**inputs)
+            break
+            # accs = []
+            # V = None
+            # for rank in range(0, layer.out_features, 8):
+            #     setattr(parent_layer, last_token, ModuleInjection.make_decomposable(layer, rank, self.algo))
+            #     if V is not None: ## set layer V using local V if computed
+            #         getattr(parent_layer, last_token).V = V
+            #     if getattr(parent_layer, last_token).V is None: ## compute V if not computed
+            #         for inputs in train_dataloader:
+            #             inputs = self._prepare_inputs(inputs)
+            #             _ = self.model(**inputs)
+            #             break
+            #     acc = self.custom_evaluate(size=64)['eval_acc']
+            #     if V is None: # set local V if computed
+            #         V = getattr(parent_layer, last_token).V
+            #     accs.append(acc)
+            # setattr(parent_layer, last_token, layer)
+            # global_accs.append(accs)
+        scores = []
+        for name, l in self.model.named_modules():
+            if isinstance(l, DecomposeLinearEigen):
+                scores.append(l.scores)
+        with open('scores_magnitude.pkl', 'wb') as f:
+            pickle.dump(scores, f)
+        sys.exit()
+        return global_accs
+    
+    def custom_evaluate(self, size=None):
+        predictions = []
+        metrics = {}
+        eval_dataloader = self.get_eval_dataloader()
+        self.model.eval()
+        for idx, inputs in enumerate(eval_dataloader):
+            with torch.no_grad():
+                if size is not None and idx*self.args.eval_batch_size == size:
+                    break
+                inputs = self._prepare_inputs(inputs)['input_ids']
+
+                logits = self.model.generate(inputs,
+                                            do_sample=True,
+                                            max_length=6,
+                                            )
+                prediction = self.tokenizer.batch_decode(logits[:,1:-1])
+                predictions.extend(prediction)
+        if size is not None:
+            accuracy = accuracy_score(self.true_labels[:size], predictions)
+        else:
+            accuracy = accuracy_score(self.true_labels, predictions)
+        metrics['eval_acc'] = accuracy
+        return metrics
 
     def reset_decomposition(self, index):
         parent_layer, last_token = self.decomposable_layers[index]

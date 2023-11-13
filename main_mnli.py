@@ -19,10 +19,11 @@ parser.add_argument("--regress_weights", type=float, default=0.1)
 parser.add_argument("--sparsity", type=float, default=0.01)
 parser.add_argument('--dataset', type=str, default = 'mnli')
 parser.add_argument('--batch_size', type=int, default = 64)
+parser.add_argument('--learning_rate', type=float, default = 1e-6)
 
 args = parser.parse_args()
 if args.save_name is None:
-    args.save_name = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_sparsity={args.sparsity}'
+    args.save_name = f'models/{args.dataset}_{args.budget}_{args.layers}_{args.algo}_regress-weights={args.regress_weights}_learning_rate={args.learning_rate}'
 
 # load the base model in 4-bit quantization
 bnb_config = BitsAndBytesConfig(
@@ -84,18 +85,24 @@ def preprocess_function_hellaswag(sample):
 
 if(args.dataset=='mnli'):
   dataset = load_dataset("multi_nli", split="train")
+  dataset_eval = load_dataset("multi_nli", split = "validation_matched")
   preprocess_function = preprocess_function_mnli
   ind = range(100000)
   dataset = dataset.select(ind)
+  label_map = ["entailment", "neutral", "contradiction"]
+  true_labels = [label_map[example['label']] for example in dataset_eval]
 
 elif(args.dataset=="boolq"):
   dataset = load_dataset("boolq", split="train")
+  dataset_eval = load_dataset("boolq", split = "validation")
   preprocess_function = preprocess_function_boolq
+  true_labels = ["True" if example['answer'] else 'False' for example in dataset_eval] 
 
 elif(args.dataset=='sst2'):
    dataset = load_dataset("sst2", split = "train")
    dataset_eval = load_dataset("sst2", split = "validation")
    preprocess_function = preprocess_function_sst2
+   true_labels = ["positive" if example['label'] == 1 else 'negative' for example in dataset]
 
 elif(args.dataset=='stsb'):
    dataset = load_dataset("glue", "stsb", split = "train")
@@ -112,6 +119,7 @@ dataset_eval = dataset_eval.map(preprocess_function)#.select(ind)
 training_args = TrainingArguments(
     output_dir=f"{args.save_name}",
     per_device_train_batch_size=args.batch_size,
+    per_device_eval_batch_size=1,
     gradient_accumulation_steps=1,
     logging_steps=1,
     lr_scheduler_type="constant",
@@ -119,7 +127,7 @@ training_args = TrainingArguments(
     num_train_epochs=100,
     save_strategy="epoch",
     save_total_limit=1,
-    learning_rate=1e-3,
+    learning_rate=args.learning_rate,
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
     evaluation_strategy='epoch',
@@ -136,6 +144,7 @@ trainer = LocalTrainer(
     kappa_factor=args.budget,
     algo=args.algo,
     regress_weights=args.regress_weights,
-    sparsity=args.sparsity
+    sparsity=args.sparsity,
+    true_labels=true_labels
 )
 trainer.train()

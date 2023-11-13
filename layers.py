@@ -2,23 +2,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import numpy as np
 
 class DecomposeLinearSVD(torch.nn.Linear):
     def __init__(self, in_features, out_features, rank, weight, bias):
         super(DecomposeLinearSVD, self).__init__(
             in_features=in_features, out_features=out_features
         )
-        self.weight = weight
-        self.weight1 = nn.Parameter(
-            torch.zeros(rank, in_features, requires_grad=True, device="cuda")
-        )
-        self.weight2 = nn.Parameter(
-            torch.zeros(out_features, rank, requires_grad=True, device="cuda")
-        )
         self.U, self.S, self.Vh = torch.linalg.svd(
             self.weight, full_matrices=False
         )
-        self.rank = rank
+        if not (isinstance(rank, float) or isinstance(rank, int)):
+            variance = float(rank.split(':')[-1])
+            S_sum = torch.cumsum(self.S.float(), 0)
+            self.rank = torch.searchsorted(S_sum, S_sum[-1]*variance).item()
+            self.target_budget = self.rank/(self.in_features*self.out_features/(self.in_features+self.out_features))
+        else:
+            self.rank = rank
+        self.weight = weight
+        self.weight1 = nn.Parameter(
+            torch.zeros(self.rank, in_features, requires_grad=True, device="cuda")
+        )
+        self.weight2 = nn.Parameter(
+            torch.zeros(out_features, self.rank, requires_grad=True, device="cuda")
+        )
         self.weight1.data = torch.transpose(torch.transpose(self.Vh[: self.rank, :],1,0) @ torch.diag((self.S[: self.rank])),1,0).cuda()
         self.weight2.data = self.U[:, : self.rank].cuda()
 
@@ -50,22 +57,40 @@ class DecomposeLinearEigen(torch.nn.Linear):
         )
         self.init = False
         self.weight = weight
+        self.rank = rank
+        self.V = None
         self.weight1 = nn.Parameter(
             torch.zeros(rank, in_features, requires_grad=True, device="cuda")
         )
         self.weight2 = nn.Parameter(
             torch.zeros(out_features, rank, requires_grad=True, device="cuda")
         )
-        self.rank = rank
 
     def init_lowrank(self, input):
-        Y = F.linear(input, self.weight, None).reshape(-1,self.weight.shape[0]) # BS, out
-        cov = torch.cov(torch.transpose(Y,1,0)) # out, out
-        _, V = torch.linalg.eig(cov) # out, out
-        V = V[:,:self.rank].float() # out, rank
+        if self.V is None:
+            Y = F.linear(input, self.weight, None).reshape(-1,self.weight.shape[0]) # BS, out
+            cov = torch.cov(torch.transpose(Y,1,0)) # out, out
+            _, self.V = torch.linalg.eig(cov) # out, out
+        self.target_budget = self.rank/(self.in_features*self.out_features/(self.in_features+self.out_features))
+        V = self.V[:,:self.rank].float() # out, rank
         self.weight2.data = V.cuda()
         self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
+        # self.get_importance(input)
         self.init = True
+
+    def get_importance(self, input):
+        input_norm = torch.norm(input.reshape(-1, input.shape[-1]), p=2, dim = 0)[None,:]
+        imp1 = input_norm * self.weight1.abs()
+        imp1 = imp1.sum(1)
+        input = F.linear(input, self.weight1, None)
+        input_norm = torch.norm(input.reshape(-1, input.shape[-1]), p=2, dim = 0)[None,:]
+        imp2 = input_norm * self.weight2.abs()
+        imp2 = imp2.sum(1)
+        self.scores = imp1.tolist()
+        # Y = XA @ self.weight2.transpose(1,0) # BS, out
+        # self.scores = []
+        # for i in range(self.rank):
+        #     self.scores.append((XA[:,i][:,None] * self.weight2[i,:][None,:]).abs().mean().item()) # BS, out
 
     def forward(self, input):
         if not self.init:
@@ -99,10 +124,14 @@ class DecomposeLinearSVDPrune(DecomposeLinearSVD):
         )
         self.pruned = False
         self.target_budget = budget
-        variance = float(self.target_budget.split(':')[-1])
-        self.S = torch.cumsum(self.S.float(), 0)
-        self.active_ranks = torch.searchsorted(self.S, self.S[-1]*variance).item()
-        self.target_budget = self.active_ranks/(self.in_features*self.out_features/(self.in_features+self.out_features))
+        if 'auto' in budget:
+            variance = float(self.target_budget.split(':')[-1])
+            self.S = torch.cumsum(self.S.float(), 0)
+            self.active_ranks = torch.searchsorted(self.S, self.S[-1]*variance).item()
+            self.target_budget = self.active_ranks/(self.in_features*self.out_features/(self.in_features+self.out_features))
+        else:
+            self.active_ranks = int((self.in_features*self.out_features/(self.in_features+self.out_features))*float(budget))
+            self.target_budget = float(self.target_budget)
 
     def forward(self, input):
         if self.pruned:
@@ -289,10 +318,16 @@ class ModuleInjection:
         elif method=='prune-channel':
             new_linear = ChannelPrune.from_linear(linear_module, budget)
         elif method=='eigen':
-            rank = int(kappa*float(budget))
+            if isinstance(budget, int):
+                rank = budget
+            else:
+                rank = int(kappa*float(budget))
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
         elif method=='svd':
-            rank = int(kappa*float(budget))
+            if 'auto' in budget:
+                rank = budget
+            else:
+                rank = int(kappa*float(budget))
             new_linear = DecomposeLinearSVD.from_linear(linear_module, rank)
         else:
             for name, param in linear_module.named_parameters():
