@@ -68,13 +68,13 @@ class DecomposeLinearEigen(torch.nn.Linear):
 
     def init_lowrank(self, input):
         if self.V is None:
-            Y = F.linear(input, self.weight, None).reshape(-1,self.weight.shape[0]) # BS, out
+            Y = F.linear(input, self.weight, None).reshape(-1,self.out_features).float().cpu() # BS, out
             cov = torch.cov(torch.transpose(Y,1,0)) # out, out
-            _, self.V = torch.linalg.eig(cov) # out, out
+            _, self.V = torch.linalg.eig(cov.float()) # out, out
         self.target_budget = self.rank/(self.in_features*self.out_features/(self.in_features+self.out_features))
-        V = self.V[:,:self.rank].float() # out, rank
-        self.weight2.data = V.cuda()
-        self.weight1.data = (torch.transpose(V,1,0) @ self.weight).cuda()
+        V = self.V[:,:self.rank].to(self.weight.dtype) # out, rank
+        self.weight2.data = V.to(self.weight.device)
+        self.weight1.data = (torch.transpose(V,1,0).to(self.weight.device) @ self.weight)
         # self.get_importance(input)
         self.init = True
 
@@ -346,14 +346,18 @@ class FeatureExtractor(nn.Module):
                 for eligible_layer in layers:
                     if eligible_layer in name:
                         if idx==index:
-                            l.register_forward_hook(self.save_outputs_hook())
+                            self.model.hook = l.register_forward_hook(self.save_outputs_hook())
                         idx+=1
 
     def save_outputs_hook(self):
         def fn(module, input, output):
             self._features = output
+            assert False
         return fn
 
     def forward(self, x):
-        _ = self.model(**x)
-        return self._features
+        try:
+            x = {k:x[k].to(self.model.device) for k in x}
+            _ = self.model(**x)
+        except Exception as E:
+            return self._features

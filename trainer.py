@@ -35,7 +35,7 @@ from transformers.trainer_callback import TrainerState
 from transformers.trainer_pt_utils import get_model_param_count
 from transformers.integrations import hp_params
 from transformers.training_args import ParallelMode, TrainingArguments
-
+from lm_eval import tasks, evaluator, utils
 
 if is_accelerate_available():
     from accelerate import Accelerator, skip_first_batches
@@ -89,6 +89,9 @@ class LocalTrainer(SFTTrainer):
         regress_weights = 1,
         sparsity = 1,
         true_labels = None,
+        eval_dataset_name = None,
+        model_name = None,
+        multigpu = False
     ):
         self.layers = layers.split(',')
         self.kappa_factor = kappa_factor
@@ -96,6 +99,9 @@ class LocalTrainer(SFTTrainer):
         self.regress_weights = regress_weights
         self.sparsity = sparsity
         self.true_labels = true_labels
+        self.eval_dataset_name = eval_dataset_name
+        self.model_name = model_name
+        self.multigpu = multigpu
         super().__init__(
             model=model,
             args=args,
@@ -626,8 +632,8 @@ class LocalTrainer(SFTTrainer):
 
         Subclass and override for custom behavior.
         """
-        teacher_feats = self.teacher_extractor(inputs)
-        student_feats = self.student_extractor(inputs)
+        teacher_feats = self.teacher_extractor(inputs).to(self.model.device).float()
+        student_feats = self.student_extractor(inputs).float()
 
         loss = nn.functional.mse_loss(teacher_feats, student_feats)
 
@@ -673,7 +679,7 @@ class LocalTrainer(SFTTrainer):
                 # if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
                     budget = l.target_budget
                     budgets.append(budget)
-            logs["budget"] = f'{budgets}'
+            logs["budget"] = budgets
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
             logs["learning_rate"] = self._get_learning_rate()
 
@@ -708,10 +714,20 @@ class LocalTrainer(SFTTrainer):
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
-        self.optimizer = torch.optim.Adam(layer.parameters(), lr=self.args.learning_rate)
+        self.optimizer = torch.optim.Adam(layer.parameters(), lr=self.args.learning_rate, eps=1e-4)
 
     def decomposer_init(self):
-        self.teacher = copy.deepcopy(self.model)
+        if self.multigpu:
+            self.teacher = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype = "auto",
+                device_map={"": 1},
+                trust_remote_code=True,
+                use_auth_token=True,
+                load_in_8bit=True,
+            )
+        else:
+            self.teacher = copy.deepcopy(self.model)
         self.decomposable_layers = []
         for name, l in self.model.named_modules():
             if isinstance(l, nn.Linear):
@@ -735,6 +751,10 @@ class LocalTrainer(SFTTrainer):
             param.requires_grad = False
 
     def decompose_layer(self, index, rank='auto'):
+        if hasattr(self.teacher, 'hook'):
+            self.teacher.hook.remove()
+        if hasattr(self.model, 'hook'):
+            self.model.hook.remove()
         for _, param in self.model.named_parameters():
             param.requires_grad = False
         parent_layer, last_token = self.decomposable_layers[index]
@@ -784,27 +804,49 @@ class LocalTrainer(SFTTrainer):
         return global_accs
     
     def custom_evaluate(self, size=None):
-        predictions = []
-        metrics = {}
-        eval_dataloader = self.get_eval_dataloader()
+        self.model.hook.remove()
         self.model.eval()
-        for idx, inputs in enumerate(eval_dataloader):
-            with torch.no_grad():
-                if size is not None and idx*self.args.eval_batch_size == size:
-                    break
-                inputs = self._prepare_inputs(inputs)['input_ids']
+        if self.true_labels is not None:
+            if size is not None:
+                size = int(size*len(self.true_labels))
+            predictions = []
+            metrics = {}
+            eval_dataloader = self.get_eval_dataloader()
+            self.model.eval()
+            for idx, inputs in enumerate(eval_dataloader):
+                with torch.no_grad():
+                    if size is not None and idx*self.args.eval_batch_size == size:
+                        break
+                    inputs = self._prepare_inputs(inputs)['input_ids']
 
-                logits = self.model.generate(inputs,
-                                            do_sample=True,
-                                            max_length=6,
-                                            )
-                prediction = self.tokenizer.batch_decode(logits[:,1:-1])
-                predictions.extend(prediction)
-        if size is not None:
-            accuracy = accuracy_score(self.true_labels[:size], predictions)
+                    logits = self.model.generate(inputs,
+                                                do_sample=True,
+                                                max_length=6,
+                                                )
+                    prediction = self.tokenizer.batch_decode(logits[:,1:-1])
+                    predictions.extend(prediction)
+            if size is not None:
+                accuracy = accuracy_score(self.true_labels[:size], predictions)
+            else:
+                accuracy = accuracy_score(self.true_labels, predictions)
+            metrics['eval_acc'] = accuracy
         else:
-            accuracy = accuracy_score(self.true_labels, predictions)
-        metrics['eval_acc'] = accuracy
+            metrics = {}
+            if self.eval_dataset_name=='truthfulqa_mc':
+                shots = 0
+            elif self.eval_dataset_name=='arc_challenge':
+                shots = 25
+            results = evaluator.simple_evaluate(
+                    model=self.model,
+                    tasks=[self.eval_dataset_name],
+                    num_fewshot=shots,
+                    batch_size='auto',
+                    max_batch_size=1,
+                    device='cuda:0',
+                    no_cache=True,
+                    limit=size
+                )
+            metrics = results['results'][self.eval_dataset_name]
         return metrics
 
     def reset_decomposition(self, index):
