@@ -28,9 +28,21 @@ from transformers import (
 )
 from datasets import Dataset
 from transformers.trainer_callback import TrainerCallback
-from transformers.trainer_utils import EvalPrediction, has_length, ShardedDDPOption, HPSearchBackend, TrainOutput, speed_metrics
+from transformers.trainer_utils import (
+    EvalPrediction,
+    has_length,
+    ShardedDDPOption,
+    HPSearchBackend,
+    TrainOutput,
+    speed_metrics,
+)
 from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
-from transformers.utils import is_sagemaker_mp_enabled, is_accelerate_available, is_torch_tpu_available, is_apex_available
+from transformers.utils import (
+    is_sagemaker_mp_enabled,
+    is_accelerate_available,
+    is_torch_tpu_available,
+    is_apex_available,
+)
 from transformers.trainer_callback import TrainerState
 from transformers.trainer_pt_utils import get_model_param_count
 from transformers.integrations import hp_params
@@ -48,7 +60,15 @@ if is_torch_tpu_available(check_device=False):
 if is_apex_available():
     from apex import amp
 
-from layers import ModuleInjection, FeatureExtractor, DecomposeLinearEigenPrune, DecomposeLinearSVDPrune, ChannelPrune, DecomposeLinearEigen, DecomposeLinearSVD
+from layers import (
+    ModuleInjection,
+    FeatureExtractor,
+    DecomposeLinearEigenPrune,
+    DecomposeLinearSVDPrune,
+    ChannelPrune,
+    DecomposeLinearEigen,
+    DecomposeLinearSVD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +78,7 @@ OPTIMIZER_NAME = "optimizer.pt"
 OPTIMIZER_NAME_BIN = "optimizer.bin"
 SCHEDULER_NAME = "scheduler.pt"
 SCALER_NAME = "scaler.pt"
+
 
 class LocalTrainer(SFTTrainer):
     def __init__(
@@ -71,8 +92,13 @@ class LocalTrainer(SFTTrainer):
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
-        optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
-        preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (
+            None,
+            None,
+        ),
+        preprocess_logits_for_metrics: Optional[
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+        ] = None,
         peft_config: Optional[Dict] = None,
         dataset_text_field: Optional[str] = None,
         packing: Optional[bool] = False,
@@ -84,16 +110,18 @@ class LocalTrainer(SFTTrainer):
         dataset_num_proc: Optional[int] = None,
         dataset_batch_size: int = 1000,
         layers: str = "Attention.q,Attention.k,Attention.v,Attention.o,DenseReluDense.wi,DenseReluDense.wo",
-        kappa_factor = 0.5,
-        algo = 'eigen',
-        regress_weights = 1,
-        sparsity = 1,
-        true_labels = None,
-        eval_dataset_name = None,
-        model_name = None,
-        multigpu = False
+        kappa_factor=0.5,
+        algo="eigen",
+        regress_weights=1,
+        sparsity=1,
+        true_labels=None,
+        eval_dataset_name=None,
+        model_name=None,
+        multigpu=False,
+        eval_epochs=1,
+        clm=False,
     ):
-        self.layers = layers.split(',')
+        self.layers = layers.split(",")
         self.kappa_factor = kappa_factor
         self.algo = algo
         self.regress_weights = regress_weights
@@ -102,6 +130,8 @@ class LocalTrainer(SFTTrainer):
         self.eval_dataset_name = eval_dataset_name
         self.model_name = model_name
         self.multigpu = multigpu
+        self.eval_epochs = eval_epochs
+        self.clm = clm
         super().__init__(
             model=model,
             args=args,
@@ -123,15 +153,22 @@ class LocalTrainer(SFTTrainer):
             num_of_sequences=num_of_sequences,
             chars_per_token=chars_per_token,
             dataset_num_proc=dataset_num_proc,
-            dataset_batch_size=dataset_batch_size
+            dataset_batch_size=dataset_batch_size,
         )
 
     def _inner_training_loop(
-        self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
+        self,
+        batch_size=None,
+        args=None,
+        resume_from_checkpoint=None,
+        trial=None,
+        ignore_keys_for_eval=None,
     ):
         self.accelerator.free_memory()
         self._train_batch_size = batch_size
-        logger.debug(f"Currently training with a batch size of: {self._train_batch_size}")
+        logger.debug(
+            f"Currently training with a batch size of: {self._train_batch_size}"
+        )
         # Data loader and number of training steps
         train_dataloader = self.get_train_dataloader()
 
@@ -139,12 +176,16 @@ class LocalTrainer(SFTTrainer):
         # number of training epochs: num_train_epochs
         # number of training steps per epoch: num_update_steps_per_epoch
         # total number of training steps to execute: max_steps
-        total_train_batch_size = self._train_batch_size * args.gradient_accumulation_steps * args.world_size
+        total_train_batch_size = (
+            self._train_batch_size * args.gradient_accumulation_steps * args.world_size
+        )
 
         len_dataloader = None
         if has_length(train_dataloader):
             len_dataloader = len(train_dataloader)
-            num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
+            num_update_steps_per_epoch = (
+                len_dataloader // args.gradient_accumulation_steps
+            )
             num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
             num_examples = self.num_examples(train_dataloader)
             if args.max_steps > 0:
@@ -156,10 +197,16 @@ class LocalTrainer(SFTTrainer):
                 # the best we can do.
                 num_train_samples = args.max_steps * total_train_batch_size
             else:
-                max_steps = math.ceil(args.num_train_epochs * num_update_steps_per_epoch)
+                max_steps = math.ceil(
+                    args.num_train_epochs * num_update_steps_per_epoch
+                )
                 num_train_epochs = math.ceil(args.num_train_epochs)
-                num_train_samples = self.num_examples(train_dataloader) * args.num_train_epochs
-        elif args.max_steps > 0:  # Rely on max_steps when dataloader does not have a working size
+                num_train_samples = (
+                    self.num_examples(train_dataloader) * args.num_train_epochs
+                )
+        elif (
+            args.max_steps > 0
+        ):  # Rely on max_steps when dataloader does not have a working size
             max_steps = args.max_steps
             # Setting a very large number of epochs so we go as many times as necessary over the iterator.
             num_train_epochs = sys.maxsize
@@ -171,7 +218,6 @@ class LocalTrainer(SFTTrainer):
                 "args.max_steps must be set to a positive value if dataloader does not have a length, was"
                 f" {args.max_steps}"
             )
-        
 
         if DebugOption.UNDERFLOW_OVERFLOW in self.args.debug:
             if self.args.n_gpu > 1:
@@ -229,7 +275,9 @@ class LocalTrainer(SFTTrainer):
 
         model = self._wrap_model(self.model_wrapped)
 
-        if (is_sagemaker_mp_enabled() or self.is_fsdp_enabled) and resume_from_checkpoint is not None:
+        if (
+            is_sagemaker_mp_enabled() or self.is_fsdp_enabled
+        ) and resume_from_checkpoint is not None:
             self._load_from_checkpoint(resume_from_checkpoint, model)
 
         # as the model is wrapped, don't use `accelerator.prepare`
@@ -249,7 +297,9 @@ class LocalTrainer(SFTTrainer):
                 if self.use_apex:
                     model = self.accelerator.prepare(self.model)
                 else:
-                    model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
+                    model, self.optimizer = self.accelerator.prepare(
+                        self.model, self.optimizer
+                    )
             else:
                 # to handle cases wherein we pass "DummyScheduler" such as when it is specified in DeepSpeed config.
                 model, self.optimizer, self.lr_scheduler = self.accelerator.prepare(
@@ -282,13 +332,23 @@ class LocalTrainer(SFTTrainer):
         logger.info("***** Running training *****")
         logger.info(f"  Num examples = {num_examples:,}")
         logger.info(f"  Num Epochs = {num_train_epochs:,}")
-        logger.info(f"  Instantaneous batch size per device = {self.args.per_device_train_batch_size:,}")
+        logger.info(
+            f"  Instantaneous batch size per device = {self.args.per_device_train_batch_size:,}"
+        )
         if self.args.per_device_train_batch_size != self._train_batch_size:
-            logger.info(f"  Training with DataParallel so batch size has been adjusted to: {self._train_batch_size:,}")
-        logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_train_batch_size:,}")
-        logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+            logger.info(
+                f"  Training with DataParallel so batch size has been adjusted to: {self._train_batch_size:,}"
+            )
+        logger.info(
+            f"  Total train batch size (w. parallel, distributed & accumulation) = {total_train_batch_size:,}"
+        )
+        logger.info(
+            f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}"
+        )
         logger.info(f"  Total optimization steps = {max_steps:,}")
-        logger.info(f"  Number of trainable parameters = {get_model_param_count(model, trainable_only=True):,}")
+        logger.info(
+            f"  Number of trainable parameters = {get_model_param_count(model, trainable_only=True):,}"
+        )
 
         self.state.epoch = 0
         start_time = time.time()
@@ -300,17 +360,25 @@ class LocalTrainer(SFTTrainer):
         if resume_from_checkpoint is not None and os.path.isfile(
             os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME)
         ):
-            self.state = TrainerState.load_from_json(os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME))
+            self.state = TrainerState.load_from_json(
+                os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME)
+            )
             epochs_trained = self.state.global_step // num_update_steps_per_epoch
             if not args.ignore_data_skip:
-                steps_trained_in_current_epoch = self.state.global_step % (num_update_steps_per_epoch)
+                steps_trained_in_current_epoch = self.state.global_step % (
+                    num_update_steps_per_epoch
+                )
                 steps_trained_in_current_epoch *= args.gradient_accumulation_steps
             else:
                 steps_trained_in_current_epoch = 0
 
-            logger.info("  Continuing training from checkpoint, will skip to saved global_step")
+            logger.info(
+                "  Continuing training from checkpoint, will skip to saved global_step"
+            )
             logger.info(f"  Continuing training from epoch {epochs_trained}")
-            logger.info(f"  Continuing training from global step {self.state.global_step}")
+            logger.info(
+                f"  Continuing training from global step {self.state.global_step}"
+            )
             if not args.ignore_data_skip:
                 logger.info(
                     f"  Will skip the first {epochs_trained} epochs then the first"
@@ -327,7 +395,11 @@ class LocalTrainer(SFTTrainer):
             # parameter to Train when using DDP.
             self.state.trial_name = self.hp_name(self._trial)
         if trial is not None:
-            assignments = trial.assignments if self.hp_search_backend == HPSearchBackend.SIGOPT else trial
+            assignments = (
+                trial.assignments
+                if self.hp_search_backend == HPSearchBackend.SIGOPT
+                else trial
+            )
             self.state.trial_params = hp_params(assignments)
         else:
             self.state.trial_params = None
@@ -335,7 +407,7 @@ class LocalTrainer(SFTTrainer):
         # to set this after the load.
         self.decomposer_init()
         # self.get_budget()
-        max_steps = max_steps/num_train_epochs*len(self.decomposable_layers)
+        max_steps = max_steps / num_train_epochs * len(self.decomposable_layers)
         num_train_epochs = len(self.decomposable_layers)
         self.state.max_steps = int(max_steps)
         self.state.num_train_epochs = num_train_epochs
@@ -349,7 +421,9 @@ class LocalTrainer(SFTTrainer):
         self._globalstep_last_logged = self.state.global_step
         model.zero_grad()
 
-        self.control = self.callback_handler.on_train_begin(args, self.state, self.control)
+        self.control = self.callback_handler.on_train_begin(
+            args, self.state, self.control
+        )
 
         # Skip the first epochs_trained epochs to get the random state of the dataloader at the right point.
         if not args.ignore_data_skip:
@@ -359,7 +433,7 @@ class LocalTrainer(SFTTrainer):
 
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
-            logger.info(f'Starting epoch: {epoch}')
+            logger.info(f"Starting epoch: {epoch}")
             self.decompose_layer(index=epoch)
             self.reset_optimizer(index=epoch)
             epoch_iterator = train_dataloader
@@ -373,23 +447,31 @@ class LocalTrainer(SFTTrainer):
                 if len_dataloader is not None
                 else args.max_steps * args.gradient_accumulation_steps
             )
-            self.control = self.callback_handler.on_epoch_begin(args, self.state, self.control)
+            self.control = self.callback_handler.on_epoch_begin(
+                args, self.state, self.control
+            )
 
-            if epoch == epochs_trained and resume_from_checkpoint is not None and steps_trained_in_current_epoch == 0:
+            if (
+                epoch == epochs_trained
+                and resume_from_checkpoint is not None
+                and steps_trained_in_current_epoch == 0
+            ):
                 self._load_rng_state(resume_from_checkpoint)
 
             rng_to_sync = False
             steps_skipped = 0
             if steps_trained_in_current_epoch > 0:
-                epoch_iterator = skip_first_batches(epoch_iterator, steps_trained_in_current_epoch)
+                epoch_iterator = skip_first_batches(
+                    epoch_iterator, steps_trained_in_current_epoch
+                )
                 steps_skipped = steps_trained_in_current_epoch
                 steps_trained_in_current_epoch = 0
                 rng_to_sync = True
 
             step = -1
             for step, inputs in enumerate(epoch_iterator):
-                if 'prune' in self.algo:
-                    if step == len(epoch_iterator)//2:
+                if "prune" in self.algo:
+                    if step == len(epoch_iterator) // 2:
                         self.hard_prune()
                 total_batched_samples += 1
                 if rng_to_sync:
@@ -409,7 +491,9 @@ class LocalTrainer(SFTTrainer):
                     steps_trained_progress_bar = None
 
                 if step % args.gradient_accumulation_steps == 0:
-                    self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
+                    self.control = self.callback_handler.on_step_begin(
+                        args, self.state, self.control
+                    )
 
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(inputs)
@@ -420,14 +504,17 @@ class LocalTrainer(SFTTrainer):
                     and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step))
                 ):
                     # if loss is nan or inf simply add the average of previous logged losses
-                    tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
+                    tr_loss += tr_loss / (
+                        1 + self.state.global_step - self._globalstep_last_logged
+                    )
                 else:
                     tr_loss += tr_loss_step
 
                 self.current_flos += float(self.floating_point_ops(inputs))
 
                 is_last_step_and_steps_less_than_grad_acc = (
-                    steps_in_epoch <= args.gradient_accumulation_steps and (step + 1) == steps_in_epoch
+                    steps_in_epoch <= args.gradient_accumulation_steps
+                    and (step + 1) == steps_in_epoch
                 )
 
                 if (
@@ -451,7 +538,9 @@ class LocalTrainer(SFTTrainer):
                             # Reduce gradients first for XLA
                             if is_torch_tpu_available():
                                 gradients = xm._fetch_gradients(self.optimizer)
-                                xm.all_reduce("sum", gradients, scale=1.0 / xm.xrt_world_size())
+                                xm.all_reduce(
+                                    "sum", gradients, scale=1.0 / xm.xrt_world_size()
+                                )
                             # AMP: gradients need unscaling
                             self.scaler.unscale_(self.optimizer)
 
@@ -492,21 +581,34 @@ class LocalTrainer(SFTTrainer):
                         optimizer_was_run = scale_before <= scale_after
                     else:
                         self.optimizer.step()
-                        optimizer_was_run = not self.accelerator.optimizer_step_was_skipped
+                        optimizer_was_run = (
+                            not self.accelerator.optimizer_step_was_skipped
+                        )
 
                     if optimizer_was_run:
                         # Delay optimizer scheduling until metrics are generated
-                        if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        if not isinstance(
+                            self.lr_scheduler,
+                            torch.optim.lr_scheduler.ReduceLROnPlateau,
+                        ):
                             self.lr_scheduler.step()
 
                     model.zero_grad()
                     self.state.global_step += 1
-                    self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
-                    self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+                    self.state.epoch = (
+                        epoch + (step + 1 + steps_skipped) / steps_in_epoch
+                    )
+                    self.control = self.callback_handler.on_step_end(
+                        args, self.state, self.control
+                    )
 
-                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+                    self._maybe_log_save_evaluate(
+                        tr_loss, model, trial, epoch, ignore_keys_for_eval
+                    )
                 else:
-                    self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
+                    self.control = self.callback_handler.on_substep_end(
+                        args, self.state, self.control
+                    )
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     break
@@ -518,8 +620,12 @@ class LocalTrainer(SFTTrainer):
                 )
                 self.control.should_training_stop = True
 
-            self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
-            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+            self.control = self.callback_handler.on_epoch_end(
+                args, self.state, self.control
+            )
+            self._maybe_log_save_evaluate(
+                tr_loss, model, trial, epoch, ignore_keys_for_eval
+            )
 
             # if tr_loss_step.item()>1e-2:
             #     self.reset_decomposition(index=epoch)
@@ -540,7 +646,9 @@ class LocalTrainer(SFTTrainer):
             # Clean the state at the end of training
             delattr(self, "_past")
 
-        logger.info("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
+        logger.info(
+            "\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n"
+        )
         if args.load_best_model_at_end and self.state.best_model_checkpoint is not None:
             # Wait for everyone to get here so we are sur the model has been saved by process 0.
             if is_torch_tpu_available():
@@ -556,7 +664,12 @@ class LocalTrainer(SFTTrainer):
         self._total_loss_scalar += tr_loss.item()
         train_loss = self._total_loss_scalar / self.state.global_step
 
-        metrics = speed_metrics("train", start_time, num_samples=num_train_samples, num_steps=self.state.max_steps)
+        metrics = speed_metrics(
+            "train",
+            start_time,
+            num_samples=num_train_samples,
+            num_steps=self.state.max_steps,
+        )
         self.store_flos()
         metrics["total_flos"] = self.state.total_flos
         metrics["train_loss"] = train_loss
@@ -568,23 +681,35 @@ class LocalTrainer(SFTTrainer):
         self.log(metrics)
 
         run_dir = self._get_output_dir(trial)
-        checkpoints_sorted = self._sorted_checkpoints(use_mtime=False, output_dir=run_dir)
+        checkpoints_sorted = self._sorted_checkpoints(
+            use_mtime=False, output_dir=run_dir
+        )
 
         # Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint and process allowed to save.
-        if self.args.should_save and self.state.best_model_checkpoint is not None and self.args.save_total_limit == 1:
+        if (
+            self.args.should_save
+            and self.state.best_model_checkpoint is not None
+            and self.args.save_total_limit == 1
+        ):
             for checkpoint in checkpoints_sorted:
                 if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):
-                    logger.info(f"Deleting older checkpoint [{checkpoint}] due to args.save_total_limit")
+                    logger.info(
+                        f"Deleting older checkpoint [{checkpoint}] due to args.save_total_limit"
+                    )
                     shutil.rmtree(checkpoint)
 
-        self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+        self.control = self.callback_handler.on_train_end(
+            args, self.state, self.control
+        )
 
         # Wait for the checkpoint to be uploaded.
         self._finish_current_push()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
-    
-    def training_step(self, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+
+    def training_step(
+        self, inputs: Dict[str, Union[torch.Tensor, Any]]
+    ) -> torch.Tensor:
         """
         Perform a training step on a batch of inputs.
 
@@ -632,35 +757,81 @@ class LocalTrainer(SFTTrainer):
 
         Subclass and override for custom behavior.
         """
-        teacher_feats = self.teacher_extractor(inputs).to(self.model.device).float()
-        student_feats = self.student_extractor(inputs).float()
+        teacher_feats = self.teacher_extractor(inputs).to(self.model.device)
+        if self.clm:
+            student_feats, loss = self.student_extractor(inputs)
+            return loss
+        else:
+            student_feats = self.student_extractor(inputs)
 
         loss = nn.functional.mse_loss(teacher_feats, student_feats)
 
         if self.regress_weights:
-            for (_, sl) in self.model.named_modules():
-                if isinstance(sl, DecomposeLinearEigenPrune) or isinstance(sl, DecomposeLinearSVDPrune) or isinstance(sl, ChannelPrune):
+            for _, sl in self.model.named_modules():
+                if (
+                    isinstance(sl, DecomposeLinearEigenPrune)
+                    or isinstance(sl, DecomposeLinearSVDPrune)
+                    or isinstance(sl, ChannelPrune)
+                ):
                     if sl.weight1.requires_grad:
                         if sl.pruned:
-                            loss += self.regress_weights*((sl.weight1.transpose(1,0) @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
+                            loss += (
+                                self.regress_weights
+                                * (
+                                    (
+                                        sl.weight1.transpose(1, 0)
+                                        @ sl.weight2.transpose(1, 0)
+                                    ).transpose(1, 0)
+                                    - (sl.weight)
+                                )
+                                .pow(2)
+                                .mean()
+                            )
                         else:
-                            loss += self.regress_weights*((sl.weight1.transpose(1,0) * sl.get_mask() @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
-                elif isinstance(sl, DecomposeLinearEigen) or isinstance(sl, DecomposeLinearSVD):
+                            loss += (
+                                self.regress_weights
+                                * (
+                                    (
+                                        sl.weight1.transpose(1, 0)
+                                        * sl.get_mask()
+                                        @ sl.weight2.transpose(1, 0)
+                                    ).transpose(1, 0)
+                                    - (sl.weight)
+                                )
+                                .pow(2)
+                                .mean()
+                            )
+                elif isinstance(sl, DecomposeLinearEigen) or isinstance(
+                    sl, DecomposeLinearSVD
+                ):
                     if sl.weight1.requires_grad:
-                        loss += self.regress_weights*((sl.weight1.transpose(1,0) @ sl.weight2.transpose(1,0)).transpose(1,0) - (sl.weight)).pow(2).mean()
+                        loss += (
+                            self.regress_weights
+                            * (
+                                (
+                                    sl.weight1.transpose(1, 0)
+                                    @ sl.weight2.transpose(1, 0)
+                                ).transpose(1, 0)
+                                - (sl.weight)
+                            )
+                            .pow(2)
+                            .mean()
+                        )
 
-        if 'prune' in self.algo:
+        if "prune" in self.algo:
             sparse_weights = []
             for name, param in self.student_extractor.named_parameters():
-                if param.requires_grad and 'zeta' in name:
+                if param.requires_grad and "zeta" in name:
                     sparse_weights.append(param)
             if len(sparse_weights):
                 for weight in sparse_weights:
-                    loss += self.sparsity*weight.abs().mean()
-                    
+                    loss += self.sparsity * weight.abs().mean()
+
         return loss
 
-    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+    def _maybe_log_save_evaluate(
+        self, tr_loss, model, trial, epoch, ignore_keys_for_eval
+    ):
         if self.control.should_log:
             if is_torch_tpu_available():
                 xm.mark_step()
@@ -675,12 +846,16 @@ class LocalTrainer(SFTTrainer):
             # if 'prune' in self.algo:
             budgets = []
             for name, l in self.model.named_modules():
-                if hasattr(l, 'target_budget'):
-                # if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
+                if hasattr(l, "target_budget"):
+                    # if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
                     budget = l.target_budget
                     budgets.append(budget)
             logs["budget"] = budgets
-            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            logs["loss"] = round(
+                tr_loss_scalar
+                / (self.state.global_step - self._globalstep_last_logged),
+                4,
+            )
             logs["learning_rate"] = self._get_learning_rate()
 
             self._total_loss_scalar += tr_loss_scalar
@@ -690,12 +865,16 @@ class LocalTrainer(SFTTrainer):
             self.log(logs)
 
         metrics = None
-        if self.control.should_evaluate:
+        if self.control.should_evaluate and (
+            epoch % self.eval_epochs == 0 or epoch == self.state.num_train_epochs - 1
+        ):
             metrics = self.custom_evaluate()
             self.log(metrics)
 
             # Run delayed LR scheduler now that metrics are populated
-            if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            if isinstance(
+                self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            ):
                 metric_to_check = self.args.metric_for_best_model
                 if not metric_to_check.startswith("eval_"):
                     metric_to_check = f"eval_{metric_to_check}"
@@ -703,24 +882,32 @@ class LocalTrainer(SFTTrainer):
 
         if self.control.should_save:
             self._save_checkpoint(model, trial, metrics=metrics)
-            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+            self.control = self.callback_handler.on_save(
+                self.args, self.state, self.control
+            )
 
     def hard_prune(self):
         for _, l in self.model.named_modules():
-            if isinstance(l, DecomposeLinearEigenPrune) or isinstance(l, DecomposeLinearSVDPrune) or isinstance(l, ChannelPrune):
+            if (
+                isinstance(l, DecomposeLinearEigenPrune)
+                or isinstance(l, DecomposeLinearSVDPrune)
+                or isinstance(l, ChannelPrune)
+            ):
                 if not l.pruned:
                     l.hard_prune()
-        
+
     def reset_optimizer(self, index):
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
-        self.optimizer = torch.optim.Adam(layer.parameters(), lr=self.args.learning_rate, eps=1e-4)
+        self.optimizer = torch.optim.Adam(
+            layer.parameters(), lr=self.args.learning_rate, eps=1e-4
+        )
 
     def decomposer_init(self):
         if self.multigpu:
             self.teacher = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype = "auto",
+                torch_dtype="auto",
                 device_map={"": 1},
                 trust_remote_code=True,
                 use_auth_token=True,
@@ -733,7 +920,7 @@ class LocalTrainer(SFTTrainer):
             if isinstance(l, nn.Linear):
                 for eligible_layer in self.layers:
                     if eligible_layer in name:
-                        tokens = name.strip().split('.')
+                        tokens = name.strip().split(".")
                         layer = self.model
                         for t in tokens[:-1]:
                             if not t.isnumeric():
@@ -750,18 +937,28 @@ class LocalTrainer(SFTTrainer):
         for _, param in self.teacher.named_parameters():
             param.requires_grad = False
 
-    def decompose_layer(self, index, rank='auto'):
-        if hasattr(self.teacher, 'hook'):
+    def decompose_layer(self, index, rank="auto"):
+        if hasattr(self.teacher, "hook"):
             self.teacher.hook.remove()
-        if hasattr(self.model, 'hook'):
+        if hasattr(self.model, "hook"):
             self.model.hook.remove()
         for _, param in self.model.named_parameters():
             param.requires_grad = False
         parent_layer, last_token = self.decomposable_layers[index]
         layer = getattr(parent_layer, last_token)
-        setattr(parent_layer, last_token, ModuleInjection.make_decomposable(getattr(parent_layer, last_token), self.kappa_factor, self.algo))
-        self.teacher_extractor = FeatureExtractor(self.teacher,index=index,layers=self.layers)
-        self.student_extractor = FeatureExtractor(self.model,index=index,layers=self.layers)
+        setattr(
+            parent_layer,
+            last_token,
+            ModuleInjection.make_decomposable(
+                getattr(parent_layer, last_token), self.kappa_factor, self.algo
+            ),
+        )
+        self.teacher_extractor = FeatureExtractor(
+            self.teacher, index=index, layers=self.layers
+        )
+        self.student_extractor = FeatureExtractor(
+            self.model, index=index, layers=self.layers, return_outputs=self.clm
+        )
 
     def get_budget(self):
         self.ranks = []
@@ -772,7 +969,11 @@ class LocalTrainer(SFTTrainer):
         for index in tqdm(range(len(self.decomposable_layers))):
             parent_layer, last_token = self.decomposable_layers[index]
             layer = copy.deepcopy(getattr(parent_layer, last_token))
-            setattr(parent_layer, last_token, ModuleInjection.make_decomposable(layer, layer.out_features, self.algo))
+            setattr(
+                parent_layer,
+                last_token,
+                ModuleInjection.make_decomposable(layer, layer.out_features, self.algo),
+            )
         for inputs in train_dataloader:
             inputs = self._prepare_inputs(inputs)
             _ = self.model(**inputs)
@@ -798,55 +999,65 @@ class LocalTrainer(SFTTrainer):
         for name, l in self.model.named_modules():
             if isinstance(l, DecomposeLinearEigen):
                 scores.append(l.scores)
-        with open('scores_magnitude.pkl', 'wb') as f:
+        with open("scores_magnitude.pkl", "wb") as f:
             pickle.dump(scores, f)
         sys.exit()
         return global_accs
-    
-    def custom_evaluate(self, size=None):
-        self.model.hook.remove()
+
+    def custom_evaluate(self, size=0.1):
+        if hasattr(self.model, "hook"):
+            self.model.hook.remove()
         self.model.eval()
         if self.true_labels is not None:
             if size is not None:
-                size = int(size*len(self.true_labels))
+                size = int(size * len(self.true_labels))
             predictions = []
             metrics = {}
             eval_dataloader = self.get_eval_dataloader()
             self.model.eval()
             for idx, inputs in enumerate(eval_dataloader):
                 with torch.no_grad():
-                    if size is not None and idx*self.args.eval_batch_size == size:
+                    if size is not None and idx * self.args.eval_batch_size == size:
                         break
-                    inputs = self._prepare_inputs(inputs)['input_ids']
+                    inputs = self._prepare_inputs(inputs)["input_ids"]
 
-                    logits = self.model.generate(inputs,
-                                                do_sample=True,
-                                                max_length=6,
-                                                )
-                    prediction = self.tokenizer.batch_decode(logits[:,1:-1])
+                    logits = self.model.generate(
+                        inputs,
+                        do_sample=True,
+                        max_length=6,
+                    )
+                    prediction = self.tokenizer.batch_decode(logits[:, 1:-1])
                     predictions.extend(prediction)
             if size is not None:
                 accuracy = accuracy_score(self.true_labels[:size], predictions)
             else:
                 accuracy = accuracy_score(self.true_labels, predictions)
-            metrics['eval_acc'] = accuracy
+            metrics["eval_acc"] = accuracy
         else:
             metrics = {}
-            if self.eval_dataset_name=='truthfulqa_mc':
+            if self.eval_dataset_name == "truthfulqa_mc":
                 shots = 0
-            elif self.eval_dataset_name=='arc_challenge':
+            elif self.eval_dataset_name == "arc_challenge":
                 shots = 25
+            elif self.eval_dataset_name == "gsm8k":
+                shots = 5
+            elif self.eval_dataset_name == "hellaswag":
+                shots = 10
+            elif self.eval_dataset_name == "winogrande":
+                shots = 5
+            else:
+                shots = 0
             results = evaluator.simple_evaluate(
-                    model=self.model,
-                    tasks=[self.eval_dataset_name],
-                    num_fewshot=shots,
-                    batch_size='auto',
-                    max_batch_size=1,
-                    device='cuda:0',
-                    no_cache=True,
-                    limit=size
-                )
-            metrics = results['results'][self.eval_dataset_name]
+                model=self.model,
+                tasks=[self.eval_dataset_name],
+                num_fewshot=shots,
+                batch_size="auto",
+                max_batch_size=2,
+                device="cuda:0",
+                no_cache=True,
+                limit=size,
+            )
+            metrics = results["results"][self.eval_dataset_name]
         return metrics
 
     def reset_decomposition(self, index):
@@ -857,14 +1068,15 @@ class LocalTrainer(SFTTrainer):
         new_linear.bias = layer.o_bias
         setattr(parent_layer, last_token, new_linear)
 
-## W (d,D) = LU (d,r) (r, D) 
-# X = (BS,d) 
-# XW - O(BS*d*D) - 2 
-# XLU - O(BS*d*r + BS*r*D) - 1 
 
-# 1/2 : r/D + r/d --> r * 1/kappa < 1 --> r < kappa 
+## W (d,D) = LU (d,r) (r, D)
+# X = (BS,d)
+# XW - O(BS*d*D) - 2
+# XLU - O(BS*d*r + BS*r*D) - 1
 
-# Check d,D values layerwise vs. loss 
-# Finetune groupwise layers 
-# Chck layernorm's effect and activation fn if any 
-## Type of decomposition, rank allocation layerwise, loss funtion for distillation 
+# 1/2 : r/D + r/d --> r * 1/kappa < 1 --> r < kappa
+
+# Check d,D values layerwise vs. loss
+# Finetune groupwise layers
+# Chck layernorm's effect and activation fn if any
+## Type of decomposition, rank allocation layerwise, loss funtion for distillation
