@@ -1,8 +1,6 @@
 import torch
 import os
-os.environ['CUDA_VISIBLE_DEVICES']="0"
 import sys
-sys.path.append('../')
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import transformers
@@ -10,27 +8,23 @@ from transformers import (
     AutoModelForCausalLM,
     BitsAndBytesConfig,
     AutoTokenizer,
-    TrainingArguments,
-    T5ForConditionalGeneration,
     DataCollatorForSeq2Seq,
 )
-from datasets import load_dataset
 from preprocess import get_bookcorpus
-from trainer import LocalTrainer
 import argparse
 from tqdm import tqdm
 from layers import ModuleInjection
-from lm_eval import evaluator
 from preprocess import *
 import json
 import time
+
 
 def tokenize(prompt, add_eos_token=True):
     result = tokenizer(
         prompt,
         truncation=True,
-        max_length=2048,
-        padding=False,
+        max_length=args.seq_len,
+        padding='max_length',
         return_tensors=None,
     )
     if (
@@ -52,50 +46,35 @@ def generate_and_tokenize_prompt(data_point):
     return tokenized_full_prompt
 
 
-def evaluate(args):
-    metrics = {}
-    results = evaluator.simple_evaluate(
-        model=base_model,
-        tasks= ["piqa"],
-        # tasks= ["hellaswag"],
-        num_fewshot=args.shots,
-        batch_size="auto",
-        max_batch_size=4,
-        device="cuda:0",
-        no_cache=True,
-    )
-    metrics = results["results"]
-    with open(args.save_path, "a") as file:
-        file.write(json.dumps(f"{metrics}"))
-        file.write("\n")
-
 
 parser = argparse.ArgumentParser("main")
 parser.add_argument("--layers", type=str, default="o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_proj")
 parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
-parser.add_argument("--budget", default="0.50")
+parser.add_argument("--budget", default=0.6)
+parser.add_argument("--start_module", type=int, default=24)
 parser.add_argument("--algo", type=str, default="eigen")
-parser.add_argument("--dataset", type=str, default="piqa")
-parser.add_argument("--batch_size", type=int, default=32)
-parser.add_argument("--save_path", type=str, default="decomposed_piqa.txt")
+parser.add_argument("--dataset", type=str, default="combination")
+parser.add_argument("--batch_size", type=int, default=512)
+parser.add_argument("--seq_len", type=int, default=128)
+parser.add_argument("--log_path", type=str, default="arguements.txt")
+parser.add_argument("--save_path", type=str, default="compressed_budget80.pt")
 parser.add_argument("--shots", type=int, default=0)
 
 
 args = parser.parse_args()
 
-with open(args.save_path, "a") as file:
-    file.write(json.dumps(f"Decomposition Using Piqa, Dataset {args.dataset} Batch Size  {args.batch_size} model {args.model} budget {args.budget}"))
+with open(args.log_path, "a") as file:
+    file.write(json.dumps(str(args)))
     file.write("\n")
 
 args.layers = args.layers.split(",")
 base_model = AutoModelForCausalLM.from_pretrained(
     "huggyllama/llama-7b",
-    torch_dtype="auto",
-    device_map="auto",
+    torch_dtype=torch.float32,
+    # device_map="auto",
     trust_remote_code=True,
-    token  = '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'
     # load_in_8bit=True,
-)
+).to(torch.device('cpu'))
 
 tokenizer = AutoTokenizer.from_pretrained(
     args.model,
@@ -128,27 +107,36 @@ for _, param in base_model.named_parameters():
     param.requires_grad = False
 
 # To run on Specific Dataset
-dataset, _, _ = get_dataset(args.dataset)
-dataset = dataset.map(generate_and_tokenize_prompt)
-dataset = dataset.select_columns(["input_ids", "attention_mask"])
-dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=args.batch_size)
+if args.dataset != 'combination' and args.dataset != 'bookcorp':
+    dataset, _, _ = get_dataset(args.dataset)
+    dataset = dataset.map(generate_and_tokenize_prompt)
+    dataset = dataset.select_columns(["input_ids", "attention_mask"])
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=args.batch_size)
 
 #To run on Book Corpora
-# data = get_bookcorpus(tokenizer,args.batch_size,64).to("cuda:0")
+elif args.dataset == 'bookcorp':
+    data = get_bookcorpus(tokenizer,512,128)#.to("cuda:0")
 
+#To run on Comb data
+elif args.dataset == 'combination':
+    dataset, _, _ = get_combination(args.batch_size)
+    dataset = dataset.map(generate_and_tokenize_prompt)
+    dataset = dataset.select_columns(["input_ids", "attention_mask"])
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=args.batch_size)
 
+else:
+    print("Dataset Not Supported")
+    exit()
 
 base_model.eval()
-# print(len(decomposable_layers))
+idx = 0
+start = time.time()
 for index in tqdm(range(len(decomposable_layers))):
-    if(index<35 or index>35+91):  ## Only decompose 13 intermediate layers
+    if(index<7*args.start_module):
         continue
-
-    if(index%1337 == 0):
-        evaluate(args,index)
-
+    print(f"Decomposed layer {index} with budget {args.budget}")
     parent_layer, last_token = decomposable_layers[index]
-    
+    idx+=1
     setattr(
         parent_layer,
         last_token,
@@ -159,14 +147,18 @@ for index in tqdm(range(len(decomposable_layers))):
 
     for _, param in base_model.named_parameters():
         param.requires_grad = False
-    base_model.eval()
-    # For running on specific Dataset 
+
+print(f"Total layers decomposed {idx}")
+
+base_model.eval()
+
+if(args.dataset!='bookcorp'):
     for inputs in dataloader:
-        inputs = {k: inputs[k].to(base_model.device) for k in inputs}    
+        print(inputs['input_ids'].shape)
+        inputs = {k: inputs[k].to(base_model.device) for k in inputs}
         _ = base_model(**inputs)
         break
+else:
+    _  = base_model(data)
 
-    #For running on Book Corpora
-    # _ = base_model(data)  
-   
-evaluate(args)
+torch.save(base_model, args.save_path)

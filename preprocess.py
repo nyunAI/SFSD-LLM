@@ -2,7 +2,7 @@ from datasets import load_dataset
 from torch.utils.data.dataset import Dataset
 import random
 import torch
-
+from datasets import concatenate_datasets
 
 def preprocess_function_arc(sample):
     example = {}
@@ -196,3 +196,17 @@ def get_bookcorpus(tokenizer, n_samples, seq_len):
         i = random.randint(0, tokenized_sample.input_ids.shape[1] - seq_len)
         tokenized_samples.append(tokenized_sample.input_ids[:, i:i+seq_len])
     return torch.cat(tokenized_samples, dim=0 )
+
+
+#########
+def get_combination( n_samples):
+    datasets = []
+    splitsize = [n_samples//6]*5 + [n_samples//6+n_samples%6]
+    for idx, dataset_name in enumerate(['piqa', 'boolq', 'arc_challenge', 'arc_easy', 'winogrande', 'hellaswag']):
+        dataset, _, _ = get_dataset(dataset_name)
+        indices = [random.randint(0, len(dataset)-1) for _ in range(splitsize[idx])]
+        dataset = dataset.select(indices)
+        dataset = dataset.select_columns(['text'])
+        datasets.append(dataset)
+    dataset = concatenate_datasets(datasets)
+    return dataset, _, _

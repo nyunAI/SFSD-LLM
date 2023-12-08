@@ -112,7 +112,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
         self.weight1.data = (
             torch.transpose(V, 1, 0).to(self.weight.device) @ self.weight
         )
-        del self.weight
+        self.weight = None
         # self.get_importance(input)
         self.init = True
 
