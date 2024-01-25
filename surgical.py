@@ -40,6 +40,7 @@ parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
 parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
+parser.add_argument("--base_model", type=str, default="decomposed_model_boolq.pt")
 
 args = parser.parse_args()
 
@@ -55,7 +56,8 @@ with open(args.log_path, "a") as file:
 #     trust_remote_code=True,
 #     # load_in_8bit=True,
 # ).to(torch.device('cpu'))
-base_model = torch.load("/home/wolfi/PTC/decomposed_model_winogrande.pt")
+    
+base_model = torch.load(args.base_model)
 
 
 
@@ -208,7 +210,6 @@ new_model = AutoModelForCausalLM.from_pretrained(
     token  = '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'
     # load_in_8bit=True,
 )
-# new_model = torch.load('latest.pt')
 decomposable_layers_new = []
 
 for name, l in new_model.named_modules():
@@ -232,23 +233,16 @@ for i in range(3):
 old_acc,_ = evaluate(new_model, chunk=0, size=0.2)
 entire_acc,_ = evaluate_vanilla(new_model)
 acc_30 = evaluate(new_model, chunk = 1, size = 0.3)
-# entire_acc = 0
 with open(args.log_path, "a") as file:
-    # curr_acc,_ = evaluate_vanilla(new_model)
     file.write(json.dumps(f"Baseline test set acc  {entire_acc} acc on 20% {old_acc} acc on disjoint 30% {acc_30}"))
     file.write("\n")
     file.write(json.dumps(f"Chunk 0 {baseline_accs[0]} Chunk 1 {baseline_accs[1]} Chunk 2 {baseline_accs[2]}"))
     file.write("\n")
 
-# acc,_ = evaluate(base_model)
-print(len(decomposable_layers_base))
 for index in tqdm(range(len(decomposable_layers_base) -1)):
     if(index<28):
         continue
-    # print("*****EVAL FIRST*****")
-    # print(index)
-    # evaluate_vanilla(new_model)
-    # print("********************")
+
     parent_layer_base, last_token_base = decomposable_layers_base[index]
     layer_base = copy.deepcopy(getattr(parent_layer_base, last_token_base)).cuda().half()
     parent_layer_new, last_token_new = decomposable_layers_new[index]
