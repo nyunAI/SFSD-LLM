@@ -4,6 +4,9 @@ import time
 import torch.nn.functional as F
 import math
 import numpy as np
+import gc
+import psutil
+    
 
 
 class DecomposeLinearSVD(torch.nn.Linear):
@@ -36,9 +39,20 @@ class DecomposeLinearSVD(torch.nn.Linear):
             1,
             0,
         ).cuda()
+        w1_bias = torch.transpose(
+            torch.transpose(self.Vh[ self.rank : , :], 1, 0)
+            @ torch.diag((self.S[self.rank:])),
+            1,
+            0,
+        ).mean(axis = 0).reshape((1,self.weight1.data.shape[1]))
+        # self.weight1.data = torch.cat((self.weight1.data,w1_bias),axis = 0).cuda()
         self.weight2.data = self.U[:, : self.rank].cuda()
+        w2_bias = self.U[:,self.rank:].mean(axis = 1).reshape((self.weight2.data.shape[0],1))
+        # self.weight2.data = torch.cat((self.weight2.data,w2_bias),axis = 1).cuda()
+        print(self.weight1.data.shape, self.weight2.data.shape)
 
     def forward(self, input):
+        print(input.device, self.weight1.device, self.weight2.device)
         return F.linear(
             F.linear(input, self.weight1, None),
             self.weight2,
@@ -67,8 +81,9 @@ class DecomposeLinearSVD(torch.nn.Linear):
 class DecomposeLinearEigen(torch.nn.Linear):
     def __init__(self, in_features, out_features, rank, weight, bias):
         super(DecomposeLinearEigen, self).__init__(
-            in_features=in_features, out_features=out_features
+            in_features=in_features, out_features=out_features, bias = True
         )
+        self.mf16 = True
         self.init = False
         self.weight = weight
         self.rank = rank
@@ -78,7 +93,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
                 rank,
                 in_features,
                 requires_grad=True,
-                device="cuda",
+                device=self.weight.device,
                 dtype=self.weight.dtype,
             )
         )
@@ -87,10 +102,21 @@ class DecomposeLinearEigen(torch.nn.Linear):
                 out_features,
                 rank,
                 requires_grad=True,
-                device="cuda",
+                device=self.weight.device,
                 dtype=self.weight.dtype,
             )
         )
+    def make_float16(self):
+        self.Y_sub = self.Y_sub.half()
+        self.V = self.V.half()
+        self.weight.data = self.weight.data.to(torch.float16)
+        self.weight2.data = self.weight2.data.to(torch.float16)
+        self.weight1.data =  self.weight1.data.to(torch.float16)
+        self.bias.data = self.bias.data.to(torch.float16)
+        self.b1 = self.b1.to(torch.float16)
+        self.mf16 = True
+        gc.collect()
+
 
     def init_lowrank(self, input):
         if self.V is None:
@@ -99,22 +125,55 @@ class DecomposeLinearEigen(torch.nn.Linear):
                 .reshape(-1, self.out_features)
                 .float()
                 .cpu()
-            )  # BS, out
-            cov = torch.cov(torch.transpose(Y, 1, 0))  # out, out
+            )  # BS, out 
+            Y_mean = torch.mean(Y, dim=0).unsqueeze(0)
+            self.Y_sub = (Y - Y_mean)
+            cov = torch.cov(torch.transpose(self.Y_sub, 1, 0))  # out, out
             _, self.V = torch.linalg.eigh(cov.float())  # out, out
         self.target_budget = self.rank / (
             self.in_features
             * self.out_features
             / (self.in_features + self.out_features)
         )
+        # self.get_importance(Y)
         V = self.V[:, -self.rank:].to(self.weight.dtype)  # out, rank
+        self.b1 = (Y_mean - Y_mean @ self.V @ self.V.transpose(1,0)).to(self.weight.device).to(self.weight.dtype)
+        V_prune = self.V[:, :-self.rank].to(self.weight.device).to(self.weight.dtype) # out, rank
+        # print(self.bias.data.dtype,V_prune.dtype, Y_sub.dtype) 
+        self.Y_sub = self.Y_sub.mean(dim = 0, keepdim = True)
+        self.bias.data = self.b1 + (V_prune @ V_prune.transpose(1,0) @ self.Y_sub.transpose(1,0)).transpose(1,0).to(self.weight.device)
+        # del V_prune
+        self.bias.data = self.bias.data.to(self.weight.device).to(self.weight.dtype)
         self.weight2.data = V.to(self.weight.device)
         self.weight1.data = (
             torch.transpose(V, 1, 0).to(self.weight.device) @ self.weight
         )
-        self.weight = None
-        # self.get_importance(input)
         self.init = True
+    # def init_lowrank(self, input):
+    #     if self.V is None:
+    #         Y = (
+    #             F.linear(input, self.weight, None)
+    #             .reshape(-1, self.out_features)
+    #             .float()
+    #             .cpu()
+    #         )  # BS, out
+    #         cov = torch.cov(torch.transpose(Y, 1, 0))  # out, out
+    #         _, V1 = torch.linalg.eigh(cov.float())  # out, out
+    #     self.target_budget = self.rank / (
+    #         self.in_features
+    #         * self.out_features
+    #         / (self.in_features + self.out_features)
+    #     )
+    #     V = V1[:, -self.rank:].to(self.weight.dtype)  # out, rank
+    #     self.weight2.data = V.to(self.weight.device)
+    #     self.weight1.data = (
+    #         torch.transpose(V, 1, 0).to(self.weight.device) @ self.weight
+    #     ).to(self.weight.device)
+    #     self.V = None
+    #     del Y,cov,V,V1
+    #     self.weight = None
+    #     # self.get_importance(input)
+    #     self.init = True
 
     def get_importance(self, input):
         input_norm = torch.norm(input.reshape(-1, input.shape[-1]), p=2, dim=0)[None, :]
@@ -133,11 +192,15 @@ class DecomposeLinearEigen(torch.nn.Linear):
     def forward(self, input):
         if not self.init:
             self.init_lowrank(input)
-        return F.linear(
+        # print(input.device, self.weight1.device,self.weight2.device)
+        out = F.linear(
             F.linear(input, self.weight1, None),
             self.weight2,
-            None,
+            self.bias
         )
+        if not self.mf16:
+            self.make_float16()
+        return out
 
     @staticmethod
     def from_linear(linear_module, rank):
@@ -435,7 +498,7 @@ class ModuleInjection:
                 rank = int(kappa * float(budget))
             new_linear = DecomposeLinearEigen.from_linear(linear_module, rank)
         elif method == "svd":
-            if "auto" in budget:
+            if isinstance(budget, int):
                 rank = budget
             else:
                 rank = int(kappa * float(budget))
