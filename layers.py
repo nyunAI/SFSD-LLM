@@ -140,7 +140,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
         self.b1 = (Y_mean - Y_mean @ self.V @ self.V.transpose(1,0)).to(self.weight.device).to(self.weight.dtype)
         V_prune = self.V[:, :-self.rank].to(self.weight.device).to(self.weight.dtype) # out, rank
         # print(self.bias.data.dtype,V_prune.dtype, Y_sub.dtype) 
-        self.Y_sub = self.Y_sub.mean(dim = 0, keepdim = True)
+        self.Y_sub = self.Y_sub.mean(dim = 0, keepdim = True).to(self.weight.device)
         self.bias.data = self.b1 + (V_prune @ V_prune.transpose(1,0) @ self.Y_sub.transpose(1,0)).transpose(1,0).to(self.weight.device)
         # del V_prune
         self.bias.data = self.bias.data.to(self.weight.device).to(self.weight.dtype)

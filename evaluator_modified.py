@@ -213,7 +213,14 @@ def evaluate(
     requests_origin = collections.defaultdict(list)
 
     overlaps = collections.defaultdict(list)  # {task_name: contaminated_docs}
-
+    gold_field = {
+        'piqa' : 'gold',
+        'winogrande' : 'answer',
+        'arc_easy' : 'gold',
+        'arc_challenge' : 'gold',
+        'hellaswag' : 'gold',
+        'boolq' : 'label'
+    }
     # If we ever run into issues where the eval tasks don't fit in memory and we can't afford a machine with bigger
     # memory, we can always modify this plumbing to support that, but I didn't want to include it just yet because
     # over-engineering is bad (or we could make it write the requests to disk and then read them back out again
@@ -347,9 +354,8 @@ def evaluate(
 
         task = task_dict[task_name]
         doc = docs[(task_name, doc_id)]
-
         if reduce=='loglikelihood_test':
-            ll_gold = requests[int(doc['answer'])-1]
+            ll_gold = requests[int(doc[gold_field[task_name]])-1]
             incorrect_requests = [req for req in requests if req != ll_gold]
             if incorrect_requests:
                 ll_incorrect_max = max(incorrect_requests)
