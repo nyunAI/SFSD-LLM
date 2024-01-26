@@ -317,6 +317,7 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
         # _,_ = evaluate(new_model)
         layer_new.V = None
         layer_new.Y_sub = None
+        layer_new.weight = None
         with open(args.log_path, "a") as file:
             file.write(json.dumps(f"Layer index {index} max compression {final_rank}"))
             file.write("\n")
