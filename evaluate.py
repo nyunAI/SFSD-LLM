@@ -19,7 +19,6 @@ from transformers import (
 from datasets import load_dataset
 from preprocess import get_combination
 from preprocess import get_bookcorpus
-from trainer import LocalTrainer
 import argparse
 from tqdm import tqdm
 from layers import ModuleInjection

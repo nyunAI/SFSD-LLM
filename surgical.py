@@ -21,7 +21,7 @@ import copy
 from datasets import load_dataset
 from preprocess import get_combination
 from preprocess import get_bookcorpus
-from trainer import LocalTrainer
+# from trainer import LocalTrainer
 import argparse
 from tqdm import tqdm
 from layers import ModuleInjection
@@ -34,13 +34,13 @@ import time
 
 parser = argparse.ArgumentParser("main")
 parser.add_argument("--layers", type=str, default="o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_proj")
-parser.add_argument("--dataset", type=str, default="piqa")
+parser.add_argument("--dataset", type=str, default="winogrande")
 parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
 parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
-parser.add_argument("--base_model", type=str, default="decomposed_model_boolq.pt")
+parser.add_argument("--base_model", type=str, default="decomposed_model_combination.pt")
 
 args = parser.parse_args()
 
@@ -81,7 +81,7 @@ for name, l in base_model.named_modules():
 
       
 
-def evaluate(temp_model, chunk, size = 0.2):
+def evaluate(temp_model, chunk, size = 0.2, reduce = 'loglikelihood_test'):
         results = simple_evaluate_chunk(
             model=temp_model,
             chunk_num=chunk,
@@ -91,8 +91,12 @@ def evaluate(temp_model, chunk, size = 0.2):
             device="cuda:0",
             no_cache=True,
             limit=size,
+            reduce=reduce
         )
-        acc = results['results'][args.dataset]['acc']
+        if reduce is not None:
+            acc = results['results'][args.dataset]['llt']
+        else:
+            acc = results['results'][args.dataset]['acc']
         params = 0
         for _, param in temp_model.named_parameters():
             params+=param.numel()
@@ -230,16 +234,16 @@ baseline_accs = []
 for i in range(3):
     base_acc,_  = evaluate(new_model, chunk = i, size = 0.0666)
     baseline_accs.append(base_acc)
-old_acc,_ = evaluate(new_model, chunk=0, size=0.2)
+old_acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
 entire_acc,_ = evaluate_vanilla(new_model)
-acc_30 = evaluate(new_model, chunk = 1, size = 0.3)
+acc_30 = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
 with open(args.log_path, "a") as file:
     file.write(json.dumps(f"Baseline test set acc  {entire_acc} acc on 20% {old_acc} acc on disjoint 30% {acc_30}"))
     file.write("\n")
     file.write(json.dumps(f"Chunk 0 {baseline_accs[0]} Chunk 1 {baseline_accs[1]} Chunk 2 {baseline_accs[2]}"))
     file.write("\n")
 
-for index in tqdm(range(len(decomposable_layers_base) -1)):
+for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
     if(index<28):
         continue
 
@@ -277,7 +281,7 @@ for index in tqdm(range(len(decomposable_layers_base) -1)):
             
             acc,_ = evaluate(new_model, chunk=i, size=0.0666)
         
-            if(acc>=baseline_accs[i] - 0.01):
+            if(acc>=baseline_accs[i] - abs(baseline_accs[i]*0.01)):
                 max_r = mid_r
             else:
                 min_r = mid_r + 1
@@ -299,9 +303,9 @@ for index in tqdm(range(len(decomposable_layers_base) -1)):
     layer_base.Y_sub = layer_base.Y_sub.to(torch.float32)
     layer_new.bias.data = layer_base.b1.cuda().half() + (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
     
-    acc,_ = evaluate(new_model, chunk=0, size=0.2)
-    if(acc < old_acc - 0.01):
-        print(f"New acc {acc} vs old acc{old_acc - 0.01} Performance Drop --> Unchanged")
+    acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
+    if(acc < old_acc - abs(old_acc*0.01)):
+        print(f"New acc {acc} vs old acc{old_acc - abs(old_acc*0.01)} Performance Drop --> Unchanged")
         setattr(parent_layer_new, last_token_new, layer_old)
         print(new_model)
         del layer_new
@@ -320,8 +324,8 @@ for index in tqdm(range(len(decomposable_layers_base) -1)):
 
     if((index+1)%7 == 0):
         with open(args.log_path, "a") as file:
-            curr_acc,_ = evaluate(new_model, chunk = 1, size = 0.3)
-            acc,_ = evaluate(new_model, chunk = 0, size = 0.2)
+            curr_acc,_ = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+            acc,_ = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
             file.write(json.dumps(f"Decomposed till {index} 30% disjoint acc {curr_acc} 20% set acc {acc}"))
             file.write("\n")
         torch.save(new_model.half(), "latest.pt")

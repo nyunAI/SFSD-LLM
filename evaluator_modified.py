@@ -31,6 +31,7 @@ def simple_evaluate_chunk(
     decontamination_ngrams_path=None,
     write_out=False,
     output_base_path=None,
+    reduce='loglikelihood_test'
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -119,6 +120,7 @@ def simple_evaluate_chunk(
         decontamination_ngrams_path=decontamination_ngrams_path,
         write_out=write_out,
         output_base_path=output_base_path,
+        reduce=reduce
     )
 
     # add info about the model and few shot config
@@ -161,6 +163,7 @@ def evaluate(
     decontamination_ngrams_path=None,
     write_out=False,
     output_base_path=None,
+    reduce='loglikelihood_test'
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -345,7 +348,17 @@ def evaluate(
         task = task_dict[task_name]
         doc = docs[(task_name, doc_id)]
 
-        metrics = task.process_results(doc, requests)
+        if reduce=='loglikelihood_test':
+            ll_gold = requests[int(doc['answer'])-1]
+            incorrect_requests = [req for req in requests if req != ll_gold]
+            if incorrect_requests:
+                ll_incorrect_max = max(incorrect_requests)
+            else:
+                ll_incorrect_max = ll_gold
+            metrics = {}
+            metrics['llt'] = ll_gold - ll_incorrect_max
+        else:
+            metrics = task.process_results(doc, requests)
         for metric, value in metrics.items():
             vals[(task_name, metric)].append(value)
 
@@ -360,7 +373,10 @@ def evaluate(
     # aggregate results
     for (task_name, metric), items in vals.items():
         task = task_dict[task_name]
-        real_metric = metric  # key when looking up the metric with task.aggregation
+        if reduce=='loglikelihood_test':
+            real_metric = 'acc'
+        else:
+            real_metric = metric  # key when looking up the metric with task.aggregation
         if metric.endswith(decontaminate_suffix):
             real_metric = metric.replace(
                 decontaminate_suffix, ""
