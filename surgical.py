@@ -281,7 +281,7 @@ for index in tqdm((range(len(decomposable_layers_base)-1))):
             if(acc>=baseline_accs[i] - 0.02):
                 ind = j
                 with open(args.log_path, "a") as file:
-                    file.write(json.dumps(f"Layer index {index} new acc {acc} old acc {baseline_accs[i] - abs(baseline_accs[i]*0.01)} chunk {i} and rank {search_space[j]}"))
+                    file.write(json.dumps(f"Layer index {index} new acc {acc} old acc {baseline_accs[i] - 0.02} chunk {i} and rank {search_space[j]}"))
                     file.write("\n")
                 break
         split_rank.append(search_space[ind])   
