@@ -254,8 +254,9 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
     setattr(parent_layer_new, last_token_new, layer_base)
     layer_new = getattr(parent_layer_new, last_token_new)
     split_rank = []
+    search_space = [1] + list((np.arange(0.05, 1.0, 0.05)*max_rank[index]).astype(np.int32))
+
     for i in range(3):
-        search_space = [1] + list((np.arange(0.05, 1.0, 0.05)*max_rank[index]).astype(np.int32))
         min_r = 0
         max_r = len(search_space) - 1
         mid_r = -10
@@ -304,7 +305,7 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
     layer_new.bias.data = layer_base.b1.cuda().half() + (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
     
     acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
-    if(acc < old_acc - abs(old_acc*0.01)):
+    if(final_rank == search_space[-1] or acc < old_acc - abs(old_acc*0.01)):
         print(f"New acc {acc} vs old acc{old_acc - abs(old_acc*0.01)} Performance Drop --> Unchanged")
         setattr(parent_layer_new, last_token_new, layer_old)
         print(new_model)
