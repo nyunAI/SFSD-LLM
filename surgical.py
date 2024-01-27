@@ -232,7 +232,7 @@ for name, l in new_model.named_modules():
                 break
 baseline_accs = []
 for i in range(3):
-    base_acc,_  = evaluate(new_model, chunk = i, size = 0.0666)
+    base_acc,_  = evaluate(new_model, chunk = i, size = 0.0666, reduce = None)
     baseline_accs.append(base_acc)
 old_acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
 entire_acc,_ = evaluate_vanilla(new_model)
@@ -243,7 +243,7 @@ with open(args.log_path, "a") as file:
     file.write(json.dumps(f"Chunk 0 {baseline_accs[0]} Chunk 1 {baseline_accs[1]} Chunk 2 {baseline_accs[2]}"))
     file.write("\n")
 
-for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
+for index in tqdm((range(len(decomposable_layers_base)-1))):
     if(index<28):
         continue
 
@@ -254,17 +254,13 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
     setattr(parent_layer_new, last_token_new, layer_base)
     layer_new = getattr(parent_layer_new, last_token_new)
     split_rank = []
-    search_space = [1] + list((np.arange(0.05, 1.0, 0.05)*max_rank[index]).astype(np.int32))
+    search_space = [1] + list((np.arange(0.1, 1.0, 0.1)*max_rank[index]).astype(np.int32))
 
     for i in range(3):
-        min_r = 0
-        max_r = len(search_space) - 1
-        mid_r = -10
-        while(min_r<=max_r):
-            mid_r = min_r + (max_r - min_r)//2
-            print(layer_base.weight2.shape, layer_base.weight1.shape, layer_base.V.shape, layer_base.weight.shape)
-            print(min_r, mid_r, max_r)
-            rank = search_space[mid_r]
+        ind = len(search_space) -1
+        for j in range(len(search_space)):
+
+            rank = search_space[j]
 
             V = copy.deepcopy(layer_base.V[:, -rank:]).cuda().half()
 
@@ -280,15 +276,15 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
             
             temp =  (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
             
-            acc,_ = evaluate(new_model, chunk=i, size=0.0666)
+            acc,_ = evaluate(new_model, chunk=i, size=0.0666, reduce = None)
 
-            if(acc>=baseline_accs[i] - abs(baseline_accs[i]*0.01)):
-                max_r = mid_r
-            else:
-                min_r = mid_r + 1
-            if(max_r == mid_r and mid_r == min_r):
+            if(acc>=baseline_accs[i] - 0.02):
+                ind = j
+                with open(args.log_path, "a") as file:
+                    file.write(json.dumps(f"Layer index {index} new acc {acc} old acc {baseline_accs[i] - abs(baseline_accs[i]*0.01)} chunk {i} and rank {search_space[j]}"))
+                    file.write("\n")
                 break
-        split_rank.append(search_space[mid_r])   
+        split_rank.append(search_space[ind])   
     final_rank = max(split_rank)
     rank = final_rank
 
@@ -305,8 +301,8 @@ for index in tqdm(reversed(range(len(decomposable_layers_base)-1))):
     layer_new.bias.data = layer_base.b1.cuda().half() + (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
     
     acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
-    if(final_rank == search_space[-1] or acc < old_acc - abs(old_acc*0.01)):
-        print(f"New acc {acc} vs old acc{old_acc - abs(old_acc*0.01)} Performance Drop --> Unchanged")
+    if(final_rank == search_space[-1] or acc < old_acc - 0.01):
+        print(f"New acc {acc} vs old acc{old_acc -(0.01)} Performance Drop --> Unchanged")
         setattr(parent_layer_new, last_token_new, layer_old)
         print(new_model)
         del layer_new
