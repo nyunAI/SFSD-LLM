@@ -355,6 +355,7 @@ def evaluate(
         task = task_dict[task_name]
         doc = docs[(task_name, doc_id)]
         if reduce=='loglikelihood_test':
+
             ll_gold = requests[int(doc[gold_field[task_name]])-1]
             incorrect_requests = [req for req in requests if req != ll_gold]
             if incorrect_requests:
