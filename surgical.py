@@ -40,11 +40,12 @@ parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
 parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
-parser.add_argument("--base_model", type=str, default="decomposed_model_combination.pt")
+parser.add_argument("--base_model", type=str, default="decomposed_model_arc_easy.pt")
 
 args = parser.parse_args()
 
 with open(args.log_path, "a") as file:
+    file.write(json.dumps(f"Specific Dataset : {args.dataset}\n"))
     file.write(json.dumps(str(args)))
     file.write("\n")
 
@@ -240,7 +241,7 @@ for i in range(3):
 
 old_acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
 entire_acc,_ = evaluate_vanilla(new_model)
-acc_30 = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+acc_30,_ = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
 
 with open(args.log_path, "a") as file:
     file.write(json.dumps(f"Baseline test set acc  {entire_acc} acc on 20% {old_acc} acc on disjoint 30% {acc_30}"))
@@ -259,10 +260,12 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     setattr(parent_layer_new, last_token_new, layer_base)
     layer_new = getattr(parent_layer_new, last_token_new)
     split_rank = []
-    search_space = [1] + list((np.arange(0.1, 1.0, 0.1)*max_rank[index]).astype(np.int32))
-
+    search_space = [1] + list((np.arange(0.1, 1.1, 0.1)*max_rank[index]).astype(np.int32))
+    print(search_space)
     for i in range(3):
         ind = len(search_space) -1
+        if(len(split_rank)>0 and max(split_rank) == search_space[-1]):
+            break
         for j in range(len(search_space)):
 
             rank = search_space[j]
@@ -326,10 +329,16 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
 
     if((index+1)%7 == 0):
         with open(args.log_path, "a") as file:
-            curr_acc,_ = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+            curr_acc,pm = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+            if(curr_acc>= acc_30 - 0.01):
+                torch.save(new_model.half(),f'delta_perf_specific_{args.dataset}.pt')
+                file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
+            if(curr_acc>=acc_30):
+                torch.save(new_model.half(), f"intact_perf_specific_{args.dataset}.pt")
+                file.write(json.dumps(f"New intact perf checkpoint with {curr_acc} params {pm}"))
             acc,pm = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
             file.write(json.dumps(f"Decomposed till {index} 30% disjoint acc {curr_acc} 20% set acc {acc} params {pm}"))
             file.write("\n")
-        torch.save(new_model.half(), "latest.pt")
+        torch.save(new_model.half(), f"final_specific_{args.dataset}.pt")
     torch.cuda.empty_cache()
     gc.collect()
