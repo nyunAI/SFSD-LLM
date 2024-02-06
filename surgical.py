@@ -27,6 +27,7 @@ from tqdm import tqdm
 from layers import ModuleInjection
 from lm_eval import evaluator
 from evaluator_modified import simple_evaluate_chunk
+from evaluator_modified import full_evaluate
 from preprocess import *
 import json
 import time
@@ -39,12 +40,14 @@ parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
+parser.add_argument("--delta", type=str, default=0.03)
 parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
 parser.add_argument("--base_model", type=str, default="decomposed_model_combination.pt")
 
 args = parser.parse_args()
-
+log_name = f"logs_{args.dataset}_llama.csv"
 with open(args.log_path, "a") as file:
+    file.write(json.dumps(f"Max Compression for Delta : {args.delta}\n"))
     file.write(json.dumps(str(args)))
     file.write("\n")
 
@@ -102,6 +105,28 @@ def evaluate(temp_model, chunk, size = 0.2, reduce = 'loglikelihood_test'):
             params+=param.numel()
         print(acc, params)
         return acc, params
+
+def evaluate_full(temp_model, size = 0.2, reduce = None):
+        results = full_evaluate(
+            model=temp_model,
+            tasks= [args.dataset],
+            num_fewshot=0,
+            batch_size=4,
+            device="cuda:0",
+            no_cache=True,
+            limit=size,
+            reduce=reduce
+        )
+        if reduce is not None:
+            acc = results['results'][args.dataset]['llt']
+        else:
+            acc = results['results'][args.dataset]['acc']
+        params = 0
+        for _, param in temp_model.named_parameters():
+            params+=param.numel()
+        print(acc, params)
+        return acc, params
+
 
 def evaluate_vanilla(temp_model):
         results = evaluator.simple_evaluate(
@@ -239,11 +264,14 @@ for i in range(3):
 
 
 old_acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
-entire_acc,_ = evaluate_vanilla(new_model)
-acc_30 = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+entire_acc,_ = evaluate_full(new_model)
+acc_30_cal = []
+acc_20_cal = []
+layer_ind = []
+params_ = []
 
 with open(args.log_path, "a") as file:
-    file.write(json.dumps(f"Baseline test set acc  {entire_acc} acc on 20% {old_acc} acc on disjoint 30% {acc_30}"))
+    file.write(json.dumps(f"Baseline test set acc disjoint {entire_acc} acc on 20% {old_acc} "))
     file.write("\n")
     file.write(json.dumps(f"Chunk 0 {baseline_accs[0]} Chunk 1 {baseline_accs[1]} Chunk 2 {baseline_accs[2]}"))
     file.write("\n")
@@ -259,10 +287,12 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     setattr(parent_layer_new, last_token_new, layer_base)
     layer_new = getattr(parent_layer_new, last_token_new)
     split_rank = []
-    search_space = [1] + list((np.arange(0.1, 1.0, 0.1)*max_rank[index]).astype(np.int32))
-
+    search_space = [1] + list((np.arange(0.1, 1.1, 0.1)*max_rank[index]).astype(np.int32))
+    print(search_space)
     for i in range(3):
         ind = len(search_space) -1
+        if(len(split_rank)>0 and max(split_rank) == search_space[-1]):
+            break
         for j in range(len(search_space)):
 
             rank = search_space[j]
@@ -282,7 +312,7 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
             temp =  (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
             layer_new.bias.data += temp
             acc,_ = evaluate(new_model, chunk=i, size=0.0666, reduce = None)
-            if(acc>=baseline_accs[i]):
+            if(acc>=baseline_accs[i] - args.delta):
                 ind = j
                 with open(args.log_path, "a") as file:
                     file.write(json.dumps(f"Layer index {index} new  {(acc)}  old  {baseline_accs[i]}  chunk {i} and rank {search_space[j]}"))
@@ -305,8 +335,8 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     layer_new.bias.data = layer_base.b1.cuda().half() + (V_prune @ V_prune.transpose(1,0) @ layer_base.Y_sub.transpose(1,0)).transpose(1,0).cuda().half()
     
     acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
-    if(final_rank == search_space[-1] or acc < old_acc):
-        print(f"New acc {acc} vs old acc{old_acc} Performance Drop --> Unchanged")
+    if(final_rank == search_space[-1] or acc < old_acc - args.delta):
+        # print(f"New acc {acc} vs old acc{old_acc} Performance Drop --> Unchanged")
         setattr(parent_layer_new, last_token_new, layer_old)
         print(new_model)
         del layer_new
@@ -326,10 +356,24 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
 
     if((index+1)%7 == 0):
         with open(args.log_path, "a") as file:
-            curr_acc,_ = evaluate(new_model, chunk = 1, size = 0.3, reduce = None)
+            curr_acc,pm = evaluate_full(new_model)
+            # if(curr_acc>= acc_30 - 0.05):
+            #     torch.save(new_model.half(),f'delta_perf_specific_{args.dataset}.pt')
+            #     file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
+            if(curr_acc>=entire_acc - entire_acc*0.05):
+                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}.pt")
+                file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             acc,pm = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
-            file.write(json.dumps(f"Decomposed till {index} 30% disjoint acc {curr_acc} 20% set acc {acc} params {pm}"))
+            acc_30_cal.append(curr_acc)
+            acc_20_cal.append(acc)
+            layer_ind.append(index)
+            params_.append(pm)
+            p = np.hstack((np.array(layer_ind).reshape((len(layer_ind),1)), np.array(acc_30_cal).reshape((len(layer_ind),1)), np.array(acc_20_cal).reshape((len(layer_ind),1)),np.array(params_).reshape((len(layer_ind),1))))
+            print(p)
+            p = pd.DataFrame(p, columns=["layer_ind", "acc_30_cal", "acc_20_cal","params"])
+            p.to_csv(log_name, index=False)
+            file.write(json.dumps(f"Decomposed till {index} 80% disjoint acc {curr_acc} 20% set acc {acc} params {pm}"))
             file.write("\n")
-        torch.save(new_model.half(), "latest.pt")
+        torch.save(new_model.half(), f"final_max_comp_{args.dataset}.pt")
     torch.cuda.empty_cache()
     gc.collect()
