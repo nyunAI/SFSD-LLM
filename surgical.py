@@ -41,11 +41,11 @@ parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
 parser.add_argument("--delta", type=str, default=0.03)
-parser.add_argument("--model", type=str, default="huggyllama/llama-7b")
-parser.add_argument("--base_model", type=str, default="decomposed_model_arc_easy.pt")
+parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
+parser.add_argument("--base_model", type=str, default="decomposed_model_mistral_combination.pt")
 
 args = parser.parse_args()
-log_name = f"logs_{args.dataset}_llama.csv"
+log_name = f"logs_{args.dataset}_mistral.csv"
 with open(args.log_path, "a") as file:
     file.write(json.dumps(f"Max Compression for Delta : {args.delta}\n"))
     file.write(json.dumps(str(args)))
@@ -232,11 +232,10 @@ def evaluate_vanilla(temp_model):
 
 
 new_model = AutoModelForCausalLM.from_pretrained(
-    "huggyllama/llama-7b",
+    args.model,
     torch_dtype=torch.float16,
     device_map="cuda",
     trust_remote_code=True,
-    token  = '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'
     # load_in_8bit=True,
 )
 decomposable_layers_new = []
@@ -361,7 +360,7 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
             #     torch.save(new_model.half(),f'delta_perf_specific_{args.dataset}.pt')
             #     file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             if(curr_acc>=entire_acc - entire_acc*0.05):
-                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}.pt")
+                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}_mistral.pt")
                 file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             acc,pm = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
             acc_30_cal.append(curr_acc)
@@ -374,6 +373,6 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
             p.to_csv(log_name, index=False)
             file.write(json.dumps(f"Decomposed till {index} 80% disjoint acc {curr_acc} 20% set acc {acc} params {pm}"))
             file.write("\n")
-        torch.save(new_model.half(), f"final_max_comp_{args.dataset}.pt")
+        torch.save(new_model.half(), f"final_max_comp_{args.dataset}_mistral.pt")
     torch.cuda.empty_cache()
     gc.collect()
