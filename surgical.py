@@ -34,31 +34,20 @@ import time
 
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--layers", type=str, default="o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_proj")
-parser.add_argument("--dataset", type=str, default="winogrande")
-parser.add_argument("--batch_size", type=int, default=256)
-parser.add_argument("--seq_len", type=int, default=128)
+parser.add_argument("--dataset", type=str, default="hellaswag")
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
-parser.add_argument("--delta", type=str, default=0.03)
+parser.add_argument("--delta", type=str, default=0.0)
 parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
 parser.add_argument("--base_model", type=str, default="decomposed_model_mistral_combination.pt")
 
 args = parser.parse_args()
-log_name = f"logs_{args.dataset}_mistral.csv"
+log_name = f"logs_{args.dataset}_mistral_3.csv"
 with open(args.log_path, "a") as file:
     file.write(json.dumps(f"Max Compression for Delta : {args.delta}\n"))
     file.write(json.dumps(str(args)))
     file.write("\n")
 
-
-# base_model = AutoModelForCausalLM.from_pretrained(
-#     "huggyllama/llama-7b",
-#     torch_dtype=torch.float32,
-#     # device_map="auto",
-#     trust_remote_code=True,
-#     # load_in_8bit=True,
-# ).to(torch.device('cpu'))
     
 base_model = torch.load(args.base_model)
 
@@ -99,7 +88,7 @@ def evaluate(temp_model, chunk, size = 0.2, reduce = 'loglikelihood_test'):
         if reduce is not None:
             acc = results['results'][args.dataset]['llt']
         else:
-            acc = results['results'][args.dataset]['acc']
+            acc = results['results'][args.dataset]['acc_norm']
         params = 0
         for _, param in temp_model.named_parameters():
             params+=param.numel()
@@ -120,7 +109,7 @@ def evaluate_full(temp_model, size = 0.2, reduce = None):
         if reduce is not None:
             acc = results['results'][args.dataset]['llt']
         else:
-            acc = results['results'][args.dataset]['acc']
+            acc = results['results'][args.dataset]['acc_norm']
         params = 0
         for _, param in temp_model.named_parameters():
             params+=param.numel()
@@ -138,97 +127,12 @@ def evaluate_vanilla(temp_model):
             no_cache=True,
             limit=0.3
         )
-        acc = results['results'][args.dataset]['acc']
+        acc = results['results'][args.dataset]['acc_norm']
         params = 0
         for _, param in temp_model.named_parameters():
             params+=param.numel()
         print(acc, params)
         return acc, params
-
-# tokenizer = AutoTokenizer.from_pretrained(
-#     args.model,
-#     trust_remote_code=True,
-#     torch_dtype="auto",
-# )
-# tokenizer.pad_token = tokenizer.eos_token
-
-# data_collator = DataCollatorForSeq2Seq(
-#     tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
-# )
-
-# def tokenize(prompt, add_eos_token=True):
-#     result = tokenizer(
-#         prompt,
-#         truncation=True,
-#         max_length=args.seq_len,
-#         padding='max_length',
-#         return_tensors=None,
-#     )
-#     if (
-#         result["input_ids"][-1] != tokenizer.eos_token_id
-#         and len(result["input_ids"]) < 2048
-#         and add_eos_token
-#     ):
-#         result["input_ids"].append(tokenizer.eos_token_id)
-#         result["attention_mask"].append(1)
-
-#     result["labels"] = result["input_ids"].copy()
-
-#     return result
-
-
-# def generate_and_tokenize_prompt(data_point):
-#     full_prompt = data_point["text"]
-#     tokenized_full_prompt = tokenize(full_prompt)
-#     return tokenized_full_prompt
-
-
-# # To run on Specific Dataset
-# if args.dataset != 'combination' and args.dataset != 'bookcorp':
-#     dataset, _, _ = get_dataset(args.dataset)
-#     dataset = dataset.map(generate_and_tokenize_prompt)
-#     dataset = dataset.select_columns(["input_ids", "attention_mask"])
-#     dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=args.batch_size)
-#     print("Done Loading Data")
-
-# #To run on Book Corpora
-# elif args.dataset == 'bookcorp':
-#     data = get_bookcorpus(tokenizer,args.batch_size,128)
-
-# #To run on Comb data
-# elif args.dataset == 'combination':
-#     dataset, _, _ = get_combination(args.batch_size)
-#     dataset = dataset.map(generate_and_tokenize_prompt)
-#     dataset = dataset.select_columns(["input_ids", "attention_mask"])
-#     dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=args.batch_size)
-
-# else:
-#     print("Dataset Not Supported")
-#     exit()
-
-# for index in tqdm(range(len(decomposable_layers_base))):
-#     if(index<28):
-#         continue
-#     parent_layer, last_token = decomposable_layers_base[index]
-#     setattr(
-#         parent_layer,
-#         last_token,
-#         ModuleInjection.make_decomposable(
-#             getattr(parent_layer, last_token), max_rank[index], args.algo
-#         ),
-#     )
-    
-#     for _, param in base_model.named_parameters():
-#         param.requires_grad = False
-
-# if(args.dataset!='bookcorp'):
-#     for inputs in dataloader:
-#         print(inputs['input_ids'].shape)
-#         inputs = {k: inputs[k].to(base_model.device) for k in inputs}
-#         _ = base_model(**inputs)
-#         break
-# else:
-#     _  = base_model(data)
 
 
 new_model = AutoModelForCausalLM.from_pretrained(
@@ -335,16 +239,12 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     
     acc,_ = evaluate(new_model, chunk=0, size=0.2, reduce = None)
     if(final_rank == search_space[-1] or acc < old_acc - args.delta):
-        # print(f"New acc {acc} vs old acc{old_acc} Performance Drop --> Unchanged")
         setattr(parent_layer_new, last_token_new, layer_old)
-        print(new_model)
         del layer_new
         with open(args.log_path, "a") as file:
             file.write(json.dumps(f"Layer index {index}, Unchanged"))
             file.write("\n")
     else:
-        # print(new_model)
-        # _,_ = evaluate(new_model)
         layer_new.V = None
         layer_new.Y_sub = None
         layer_new.weight = None
@@ -356,11 +256,8 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     if((index+1)%7 == 0):
         with open(args.log_path, "a") as file:
             curr_acc,pm = evaluate_full(new_model)
-            # if(curr_acc>= acc_30 - 0.05):
-            #     torch.save(new_model.half(),f'delta_perf_specific_{args.dataset}.pt')
-            #     file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             if(curr_acc>=entire_acc - entire_acc*0.05):
-                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}_mistral.pt")
+                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}_mistral_3.pt")
                 file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             acc,pm = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
             acc_30_cal.append(curr_acc)
@@ -373,6 +270,6 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
             p.to_csv(log_name, index=False)
             file.write(json.dumps(f"Decomposed till {index} 80% disjoint acc {curr_acc} 20% set acc {acc} params {pm}"))
             file.write("\n")
-        torch.save(new_model.half(), f"final_max_comp_{args.dataset}_mistral.pt")
+        torch.save(new_model.half(), f"final_max_comp_{args.dataset}_mistral_3.pt")
     torch.cuda.empty_cache()
     gc.collect()
