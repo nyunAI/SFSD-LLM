@@ -5,6 +5,8 @@ Use run decomposer.py script to instantiate a model instance, decompose all its 
 
 **Step 2:**
 For surgical rank search based on commonsense reasoning datasets, use the path of the checkpoint from the previous step as an argument for surgical.py and run it. This will run the script along with continuous evaluation and checkpoints for both the disjoint splits (Search split and Test split). A log file will be created to track the progress of the rank search as well as the evaluation metrics.
+
+
 **Step 3 (To run rank search based on perplexity):**
 Run the perplexity_test.py script providing the path of the checkpoint from Step 1 as an arguement. Logs will be created similar to Step 2 and evaluation on common sense reasoning tasks will be done on the entire test dataset.
 
