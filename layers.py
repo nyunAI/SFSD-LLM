@@ -83,7 +83,7 @@ class DecomposeLinearEigen(torch.nn.Linear):
         super(DecomposeLinearEigen, self).__init__(
             in_features=in_features, out_features=out_features, bias = True
         )
-        self.mf16 = True
+        self.mf16 = False
         self.init = False
         self.weight = weight
         self.rank = rank

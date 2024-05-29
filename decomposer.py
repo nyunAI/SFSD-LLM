@@ -2,7 +2,6 @@ import torch
 import sys
 sys.path.append('../')
 import numpy as np
-import gc
 import pandas as pd
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -11,23 +10,18 @@ from transformers import (
     AutoModelForCausalLM,
     BitsAndBytesConfig,
     AutoTokenizer,
-    TrainingArguments,
-    T5ForConditionalGeneration,
     DataCollatorForSeq2Seq,
 )
-import copy
 from datasets import load_dataset
 from preprocess import get_combination
 from preprocess import get_bookcorpus
-from trainer import LocalTrainer
 import argparse
 from tqdm import tqdm
 from layers import ModuleInjection
 from lm_eval import evaluator
 from preprocess import *
 import json
-import time
-
+from dataset_ppl import get_wikitext2
 
 parser = argparse.ArgumentParser("main")
 parser.add_argument("--layers", type=str, default="o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_proj")
@@ -36,6 +30,7 @@ parser.add_argument("--batch_size", type=int, default=512)
 parser.add_argument("--seq_len", type=int, default=128)
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
+parser.add_argument("--weights_name", type=str, default="decomposed_model_mistral_combination.pt")
 parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
 
 args = parser.parse_args()
@@ -119,6 +114,7 @@ if args.dataset == 'wikitext2':
     dataset = get_wikitext2(tokenizer, seq_len = args.seq_len )
     dataloader = DataLoader(dataset, batch_size = args.batch_size)
 
+#To run on Commonsense Reasoning Datasets
 elif args.dataset != 'combination' and args.dataset != 'bookcorp':
     dataset, _, _ = get_dataset(args.dataset)
     dataset = dataset.map(generate_and_tokenize_prompt)
@@ -128,7 +124,7 @@ elif args.dataset != 'combination' and args.dataset != 'bookcorp':
 
 #To run on Book Corpora
 elif args.dataset == 'bookcorp':
-    data = get_bookcorpus(tokenizer,args.batch_size,128)
+    data = get_bookcorpus(tokenizer, args.batch_size, args.seq_len)
 
 #To run on Comb data
 elif args.dataset == 'combination':
@@ -160,11 +156,10 @@ if(args.dataset == 'wikitext2'):
 
 elif(args.dataset!='bookcorp'):
     for inputs in dataloader:
-        print(inputs['input_ids'].shape)
         inputs = {k: inputs[k].to(base_model.device) for k in inputs}
         _ = base_model(**inputs)
         break
 else:
     _  = base_model(data)
 
-torch.save(base_model.half(),f"decomposed_model_mistral_{args.dataset}.pt")
+torch.save(base_model.half(),args.weights_name)

@@ -21,7 +21,6 @@ import copy
 from datasets import load_dataset
 from preprocess import get_combination
 from preprocess import get_bookcorpus
-# from trainer import LocalTrainer
 import argparse
 from tqdm import tqdm
 from layers import ModuleInjection
@@ -34,10 +33,12 @@ import time
 
 
 parser = argparse.ArgumentParser("main")
-parser.add_argument("--dataset", type=str, default="hellaswag")
+parser.add_argument("--dataset", type=str, default="piqa")
+parser.add_argument("--layers", type=str, default="o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_proj")
 parser.add_argument("--log_path", type=str, default="surgical_logs.txt")
 parser.add_argument("--algo", type=str, default="eigen")
-parser.add_argument("--delta", type=str, default=0.0)
+parser.add_argument("--delta", type=float, default=0.0)
+parser.add_argument("--start_layer", type=int, default=28)
 parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
 parser.add_argument("--base_model", type=str, default="decomposed_model_mistral_combination.pt")
 
@@ -180,7 +181,7 @@ with open(args.log_path, "a") as file:
     file.write("\n")
 
 for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
-    if(index<28):
+    if(index<args.start_layer):
         continue
 
     parent_layer_base, last_token_base = decomposable_layers_base[index]
@@ -256,9 +257,9 @@ for index in tqdm(reversed((range(len(decomposable_layers_base)-1)))):
     if((index+1)%7 == 0):
         with open(args.log_path, "a") as file:
             curr_acc,pm = evaluate_full(new_model)
-            if(curr_acc>=entire_acc - entire_acc*0.05):
-                torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}_mistral_3.pt")
-                file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
+            # if(curr_acc>=entire_acc - entire_acc*0.05):
+                # torch.save(new_model.half(), f"delta_perf_max_comp_{args.dataset}_mistral_3.pt")
+                # file.write(json.dumps(f"New delta perf checkpoint with {curr_acc} params {pm}"))
             acc,pm = evaluate(new_model, chunk = 0, size = 0.2, reduce = None)
             acc_30_cal.append(curr_acc)
             acc_20_cal.append(acc)

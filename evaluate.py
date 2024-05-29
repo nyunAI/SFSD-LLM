@@ -138,16 +138,16 @@ def llama_eval(model, test_lodaer, device):
 
 parser = argparse.ArgumentParser("main")
 
-parser.add_argument("--log_path", type=str, default="arc_easy_compressed.csv")
+parser.add_argument("--log_path", type=str, default="compressed_evaluate.csv")
 parser.add_argument("--load_path", type=str, default="/home/wolfi/PTC/latest.pt")
-
+parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
 parser.add_argument("--shots", type=int, default=0)
 
+
+args = parser.parse_args()
 tokenizer = AutoTokenizer.from_pretrained(
-    "huggyllama/llama-7b",
+    args.model,
     trust_remote_code=True,
     torch_dtype="auto",
 )
-args = parser.parse_args()
-
 evaluate(args)
