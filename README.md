@@ -7,7 +7,7 @@ This repository contains the code to reproduce our results by following the step
 {Need to add comments regarding specific library dependencies here}
 
 To be able to run the evaluation functions present in our repository it is neccessary to pull the master branch from the llm-evaluation-harness: https://github.com/EleutherAI/lm-evaluation-harness/tree/master and run the command 'pip install -e' from inside the pulled repository.
-## Supported Models :
+## Supported Models 
 
 [LLaMa - HuggingFace](https://huggingface.co/huggyllama/llama-7b)
 
