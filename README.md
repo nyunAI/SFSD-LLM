@@ -13,7 +13,7 @@ To be able to run the evaluation functions present in our repository it is necce
 
 [Mistral - HuggingFace](https://huggingface.co/mistralai/Mistral-7B-v0.1)
 
-Almost all LLMs, comprising repeated modules of Attention Block + MLP Block, will be readily supported with minimal to no adjustments required for the --layer argument.
+Almost all LLMs, comprising of repeated modules of Attention Block + MLP Block, will be readily supported with minimal to no adjustments required for the --layer argument.
 ## Results
 
 The table below shows the results of our experiments comparing Feature Space Decomposition, Weight Space Decomposition, and LLM-Pruner. The decomposition experiments apply uniform sparsity to a subset of the LLM layers :
