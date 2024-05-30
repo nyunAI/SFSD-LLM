@@ -223,9 +223,9 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <th colspan="2">0</th>
-      <th colspan="2">32</th>
-      <th colspan="2">64</th>
-      <th colspan="2">128</th>
+      <th colspan="2">35</th>
+      <th colspan="2">70</th>
+      <th colspan="2">140</th>
     </tr>
     <tr>
       <th>Accuracy</th>
