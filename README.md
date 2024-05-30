@@ -37,7 +37,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
 | LLM-Pruner     | 3.4          | 206.59 | 52.32 | 59.63 | 35.64     | 53.20      | 33.50 | 27.22 | 43.58   |
 
 
-#### Results for Task Specific Rank Search :
+#### Results for Task Specific Rank Search 
 
 Below are the results of a task-specific rank search aimed at maintaining the performance on a 20% evaluation set while reporting the numbers on a disjoint 80% of the evaluation set. There is no specific budget constraint for the rank search; instead, it is conducted to achieve maximum compression while preserving performance. The rank search is performed individually for each dataset.
 <table>
