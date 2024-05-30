@@ -50,7 +50,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     <tr>
       <td rowspan="7">LLaMa-7b</td>
       <td>PIQA</td>
-      <td>78.46</td>
+      <td>78.67</td>
       <td>76.82</td>
       <td>76.39</td>
       <td>75.13</td>
@@ -60,7 +60,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <td>BoolQ</td>
-      <td>75.41</td>
+      <td>75.04</td>
       <td>73.61</td>
       <td>72.26</td>
       <td>73.21</td>
@@ -70,7 +70,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <td>ARC-C</td>
-      <td>45.22</td>
+      <td>44.88</td>
       <td>42.92</td>
       <td>42.24</td>
       <td>41.38</td>
@@ -90,7 +90,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <td>Winogrande</td>
-      <td>69.61</td>
+      <td>70.00</td>
       <td>69.29</td>
       <td>69.46</td>
       <td>69.37</td>
@@ -100,7 +100,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <td>Hellaswag</td>
-      <td>75.76</td>
+      <td>76.22</td>
       <td>74.15</td>
       <td>71.65</td>
       <td>69.09</td>
@@ -110,7 +110,7 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
     <tr>
       <td>Average</td>
-      <td>69.55</td>
+      <td>69.61</td>
       <td>68.04</td>
       <td>66.79</td>
       <td>65.78</td>
@@ -213,6 +213,170 @@ The table below shows the results of our experiments comparing Feature Space Dec
     </tr>
   </tbody>
 </table>
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="3">Model</th>
+      <th rowspan="3">Dataset</th>
+      <th colspan="8">Layers Pruned</th>
+    </tr>
+    <tr>
+      <th colspan="2">0</th>
+      <th colspan="2">32</th>
+      <th colspan="2">64</th>
+      <th colspan="2">128</th>
+    </tr>
+    <tr>
+      <th>Accuracy</th>
+      <th>Budget</th>
+      <th>Accuracy</th>
+      <th>Budget</th>
+      <th>Accuracy</th>
+      <th>Budget</th>
+      <th>Accuracy</th>
+      <th>Budget</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="6">LLaMA-7B</td>
+      <td>PIQA</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>BoolQ</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>ARC-C</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>ARC-E</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Winogrande</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Hellaswag</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td rowspan="6">Mistral-7B</td>
+      <td>PIQA</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>BoolQ</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>ARC-C</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>ARC-E</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Winogrande</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Hellaswag</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+  </tbody>
+</table>
+
+
 For detailed plots on the variation of model performance versus parameters sparsified using surgical rank search, for all common sense reasoning tasks, please refer to our [paper](https://www.arxiv.org/pdf/2405.13039).
 
 ## Steps to reproduce results 
