@@ -4,8 +4,6 @@ This repository contains the code for our paper: [Surgical Feature-Space Decompo
 ## Overview
 This repository contains the code to reproduce our results by following the steps outlined below. The initial decomposition can be executed on a CPU-only machine, while the surgical rank search experiments require a single NVIDIA L4 GPU.
 
-{Need to add comments regarding specific library dependencies here}
-
 To be able to run the evaluation functions present in our repository it is neccessary to pull the master branch from the llm-evaluation-harness: https://github.com/EleutherAI/lm-evaluation-harness/tree/master and run the command 'pip install -e' from inside the pulled repository.
 
 ## Key Features :
@@ -417,6 +415,12 @@ In the Perplexity-based Surgical Rank Search, the goal during compression is to 
 For detailed plots on the variation of model performance versus parameters sparsified using surgical rank search, for all common sense reasoning tasks, please refer to our [paper](https://www.arxiv.org/pdf/2405.13039).
 
 ## Steps to reproduce results 
+
+Installing requirements 
+
+```bash
+pip install -r requirements.txt 
+```
 
 **Step 1 :**
 
