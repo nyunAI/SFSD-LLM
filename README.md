@@ -7,6 +7,12 @@ This repository contains the code to reproduce our results by following the step
 {Need to add comments regarding specific library dependencies here}
 
 To be able to run the evaluation functions present in our repository it is neccessary to pull the master branch from the llm-evaluation-harness: https://github.com/EleutherAI/lm-evaluation-harness/tree/master and run the command 'pip install -e' from inside the pulled repository.
+
+## Key Features :
+- [x] **Efficient** : This is a Zero Shot compression algorithm requiring no training steps, thus there is no need for large GPU resources.
+- [x] **Targeted Compression** : Allows compression in a task specific as well as task agnostic (perplexity based) way.
+- [x] **Compression Control** : The Surgical Rank Search process results in a more fine-grained control over the compressed models' budgets.
+- [x] **Bias Reduction** : Compressed models showcase reduced stereotype biases and undergo significant unlearning-learning which are added benefits of this method. 
 ## Supported Models 
 
 [LLaMa - HuggingFace](https://huggingface.co/huggyllama/llama-7b)
