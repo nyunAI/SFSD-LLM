@@ -28,6 +28,191 @@ The table below shows the results of our experiments comparing Feature Space Dec
 | Weight Space   | 3.4          | 215.61 | 62.08 | 53.59 | 27.88     | 48.46      | 27.15 | 27.05 | 41.10   |
 | LLM-Pruner     | 3.4          | 206.59 | 52.32 | 59.63 | 35.64     | 53.20      | 33.50 | 27.22 | 43.58   |
 
+#### Results for Perplexity Based Surgical Rank Search
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Model</th>
+      <th rowspan="2">Datasets</th>
+      <th colspan="9">Budget</th>
+    </tr>
+    <tr>
+      <th>100%</th>
+      <th>94%</th>
+      <th>87%</th>
+      <th>83%</th>
+      <th>79%</th>
+      <th>75%</th>
+      <th>70%</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="7">LLaMa-7b</td>
+      <td>PIQA</td>
+      <td>78.46</td>
+      <td>76.82</td>
+      <td>76.39</td>
+      <td>75.13</td>
+      <td>73.55</td>
+      <td>71.71</td>
+      <td>71.27</td>
+    </tr>
+    <tr>
+      <td>BoolQ</td>
+      <td>75.41</td>
+      <td>73.61</td>
+      <td>72.26</td>
+      <td>73.21</td>
+      <td>71.07</td>
+      <td>66.02</td>
+      <td>64.92</td>
+    </tr>
+    <tr>
+      <td>ARC-C</td>
+      <td>45.22</td>
+      <td>42.92</td>
+      <td>42.24</td>
+      <td>41.38</td>
+      <td>40.01</td>
+      <td>36.86</td>
+      <td>35.07</td>
+    </tr>
+    <tr>
+      <td>ARC-E</td>
+      <td>72.85</td>
+      <td>71.46</td>
+      <td>68.56</td>
+      <td>66.50</td>
+      <td>64.18</td>
+      <td>60.48</td>
+      <td>55.26</td>
+    </tr>
+    <tr>
+      <td>Winogrande</td>
+      <td>69.61</td>
+      <td>69.29</td>
+      <td>69.46</td>
+      <td>69.37</td>
+      <td>67.56</td>
+      <td>62.67</td>
+      <td>56.35</td>
+    </tr>
+    <tr>
+      <td>Hellaswag</td>
+      <td>75.76</td>
+      <td>74.15</td>
+      <td>71.65</td>
+      <td>69.09</td>
+      <td>65.67</td>
+      <td>60.29</td>
+      <td>52.62</td>
+    </tr>
+    <tr>
+      <td>Average</td>
+      <td>69.55</td>
+      <td>68.04</td>
+      <td>66.79</td>
+      <td>65.78</td>
+      <td>63.68</td>
+      <td>59.67</td>
+      <td>55.92</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Model</th>
+      <th rowspan="2">Datasets</th>
+      <th colspan="9">Budget</th>
+    </tr>
+    <tr>
+      <th>100%</th>
+      <th>94%</th>
+      <th>87%</th>
+      <th>83%</th>
+      <th>79%</th>
+      <th>75%</th>
+      <th>70%</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="7">Mistral-7b</td>
+      <td>PIQA</td>
+      <td>80.52</td>
+      <td>80.01</td>
+      <td>78.73</td>
+      <td>78.84</td>
+      <td>76.99</td>
+      <td>75.68</td>
+      <td>75.84</td>
+    </tr>
+    <tr>
+      <td>BoolQ</td>
+      <td>83.58</td>
+      <td>81.38</td>
+      <td>81.56</td>
+      <td>81.34</td>
+      <td>78.96</td>
+      <td>76.54</td>
+      <td>73.33</td>
+    </tr>
+    <tr>
+      <td>ARC-C</td>
+      <td>54.01</td>
+      <td>52.90</td>
+      <td>49.74</td>
+      <td>47.61</td>
+      <td>43.51</td>
+      <td>38.22</td>
+      <td>37.20</td>
+    </tr>
+    <tr>
+      <td>ARC-E</td>
+      <td>79.54</td>
+      <td>79.38</td>
+      <td>78.37</td>
+      <td>77.65</td>
+      <td>74.83</td>
+      <td>71.93</td>
+      <td>70.41</td>
+    </tr>
+    <tr>
+      <td>Winogrande</td>
+      <td>74.03</td>
+      <td>74.51</td>
+      <td>73.56</td>
+      <td>72.06</td>
+      <td>70.80</td>
+      <td>65.43</td>
+      <td>64.48</td>
+    </tr>
+    <tr>
+      <td>Hellaswag</td>
+      <td>81.05</td>
+      <td>79.91</td>
+      <td>77.65</td>
+      <td>75.77</td>
+      <td>71.80</td>
+      <td>66.13</td>
+      <td>60.37</td>
+    </tr>
+    <tr>
+      <td>Average</td>
+      <td>75.46</td>
+      <td>74.69</td>
+      <td>73.27</td>
+      <td>72.21</td>
+      <td>69.48</td>
+      <td>65.56</td>
+      <td>63.60</td>
+    </tr>
+  </tbody>
+</table>
 For detailed plots on the variation of model performance versus parameters sparsified using surgical rank search, for all common sense reasoning tasks, please refer to our [paper](https://www.arxiv.org/pdf/2405.13039).
 
 ## Steps to reproduce results 
@@ -64,6 +249,7 @@ python3 surgical.py --layers o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_
 
 #### To run rank search based on perplexity:
 Run the perplexity_test.py script providing the path of the checkpoint from Step 1 as an argument. Logs will be created and evaluation on common sense reasoning tasks will be done on the entire test dataset.
+
 
 
 
