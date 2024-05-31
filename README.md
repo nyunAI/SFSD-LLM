@@ -455,6 +455,19 @@ python3 surgical.py --layers o_proj,q_proj,v_proj,k_proj,gate_proj,up_proj,down_
 #### To run rank search based on perplexity:
 Run the perplexity_test.py script providing the path of the checkpoint from Step 1 as an argument. Logs will be created and evaluation on common sense reasoning tasks will be done on the entire test dataset.
 
+## Citation
+If you use SFSD-LLM in your research, kindly cite!
+
+```bibtext
+@article{chavan2024surgical,
+  title={Surgical Feature-Space Decomposition of LLMs: Why, When and How?},
+  author={Chavan, Arnav and Lele, Nahush and Gupta, Deepak},
+  journal={arXiv preprint arXiv:2405.13039},
+  year={2024}
+}
+```
+
+
 
 
 
